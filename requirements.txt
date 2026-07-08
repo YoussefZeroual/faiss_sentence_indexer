@@ -1,0 +1,5 @@
+numpy
+faiss-gpu
+sentence-transformers
+conllu
+lxml

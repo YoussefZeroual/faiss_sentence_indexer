@@ -1,0 +1,10 @@
+# .gitignore
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.npy
+*.faiss
+*.json
+.ipynb_checkpoints/
+test

@@ -1,4 +1,4 @@
-
+import numpy as np
 import json
 import logging 
 logging.basicConfig(
@@ -48,7 +48,7 @@ def search(query_str, index=None, metric_type=None, top_k=10, metadata=None):
     if hasattr(index, "nprobe"):
         index.nprobe = 8
     distances, indices = index.search(query_vector, top_k)
-    matches = [(metadata["sent_id"][idx],metadata["raw_text"][idx], float(distance))
+    matches = [(metadata["sent_id"][idx],metadata["raw_text"][idx], np.round(float(distance),3))
                for idx, distance in zip(indices[0], distances[0])
                if 0 <= idx < len_metadata]
     return matches

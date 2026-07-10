@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import json
 import logging
 import os
@@ -13,7 +14,14 @@ PID_FILE = "/tmp/embed_daemon.pid"
 READY_FILE = "/tmp/embed_daemon.ready"
 LOG_FILE = "/tmp/embed_daemon.log"
 PROGRESS_DIR = "/tmp/embed_progress"
+
 os.makedirs(PROGRESS_DIR, exist_ok=True)
+model_mapping = {
+    "camembert-base":"dangvantuan/sentence-camembert-base",
+    "bge-m3":"BAAI/bge-m3"
+    }
+
+MODEL_NAME =  model_mapping["camembert-base"]
 
 # --- logging ---
 logging.basicConfig(
@@ -49,7 +57,7 @@ def main():
     logger.info("Daemon starting, PID=%s", os.getpid())
 
     logger.info("Loading model...")
-    model = SentenceTransformer("dangvantuan/sentence-camembert-base")
+    model = SentenceTransformer(MODEL_NAME)
     logger.info("Model loaded successfully")
 
     listener = Listener(("localhost", 6000), authkey=b"secret")

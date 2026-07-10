@@ -13,7 +13,6 @@ PID_FILE = "/tmp/embed_daemon.pid"
 READY_FILE = "/tmp/embed_daemon.ready"
 PROGRESS_DIR = "/tmp/embed_progress"
 
-
 def _progress_path(job_id):
     return os.path.join(PROGRESS_DIR, f"{job_id}.json")
 

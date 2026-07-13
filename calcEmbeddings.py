@@ -8,7 +8,7 @@ from utils.embed_client import encode
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    filename='/home/miai_guest/zeroualy/module_faiss/app.log'
+    #filename='/home/miai_guest/zeroualy/module_faiss/app.log'
 )
 logger = logging.getLogger(__name__)
 logging.getLogger("faiss").setLevel(logging.WARNING)
@@ -119,20 +119,23 @@ def parse_sentences(file_path= None,mode = "conllu"):
         logger.info("Parsing CONLLU sentences")
         sentence_list,metadata = parse_conllu_fast(file_path)
         t1 = time.perf_counter()
+        len_s = len(sentence_list)
         ex_time = t1-t0
-        logger.info("Sentences parsed in %s seconds",np.round(ex_time,2))
-        return sentence_list
+        logger.info("%s Sentences parsed in %s seconds",len_s,np.round(ex_time,2))
+        return sentence_list,metadata
     elif mode == "xml":
         t0 = time.perf_counter()
         logger.info("Parsing xml sentences")
         sentence_list,metadata = parse_sentences_xml_conllu(file_path)
+        len_s = len(sentences)
         t1 = time.perf_counter()
         ex_time = t1-t0
-        logger.info("Sentences parsed in %s seconds",np.round(ex_time,2))
+        logger.info("%s Sentences parsed in %s seconds",len_s,np.round(ex_time,2))
         return sentence_list,metadata
 
 
 def calcEMbeddings(collection_file_path=None, output_file_path=None, mode="conllu",reduce_precision=False):
+    logger.info("parsing sentences, mode=%s",mode)
     sentence_list,metadata = parse_sentences(collection_file_path,mode=mode)
     logger.info("Encoding sentences with model")
     import time

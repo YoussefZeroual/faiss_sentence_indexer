@@ -112,7 +112,30 @@ def parse_sentences_xml_conllu(filepath):
         sent_list.append(raw_text)
 
     return sent_list,metadata
+def parse_sentence_trs(file_path=None):
+    logger.info("mode is trs")
+    data = None
+    with open(file_path,"rb") as f:
+        data = f.read()
+    parser = etree.XMLParser(recover=True)
+    tree = etree.fromstring(data,parser=parser)
+    sentences = tree.xpath("//Turn")
+    len_s = len(sentences)
+    print(len_s)
+    metadata = {"sent_id":[],
+                 "raw_text":[]}
+    sent_list = []
+    for s in sentences:
+        sent_id = s.get("startTime")
+        raw_text = "".join(s.itertext())
+        raw_text = fix_punctuation_spaces(raw_text).replace(' ',' ')
+        logger.info("Sentid %s, sent tex: %s",sent_id,raw_text)
 
+        metadata["sent_id"].append(sent_id)
+        metadata["raw_text"].append(raw_text)
+        sent_list.append(raw_text)
+
+    return sent_list,metadata
 def parse_sentences(file_path= None,mode = "conllu"):
     if mode == "conllu":
         t0 = time.perf_counter()
@@ -127,6 +150,15 @@ def parse_sentences(file_path= None,mode = "conllu"):
         t0 = time.perf_counter()
         logger.info("Parsing xml sentences")
         sentences,metadata = parse_sentences_xml_conllu(file_path)
+        len_s = len(sentences)
+        t1 = time.perf_counter()
+        ex_time = t1-t0
+        logger.info("%s Sentences parsed in %s seconds",len_s,np.round(ex_time,2))
+        return sentences,metadata
+    elif mode == "trs":
+        t0 = time.perf_counter()
+        logger.info("Parsing trs sentences")
+        sentences,metadata = parse_sentence_trs(file_path)
         len_s = len(sentences)
         t1 = time.perf_counter()
         ex_time = t1-t0

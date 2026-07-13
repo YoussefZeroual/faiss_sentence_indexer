@@ -11,7 +11,7 @@ from makeIndex import makeIndex
 from utils.embed_client import encode
 from searchEmbedding import search, load_metadata, load_index
 
-MODE_BY_EXT = {".conllu": "conllu", ".xml": "xml"}
+MODE_BY_EXT = {".conllu": "conllu", ".xml": "xml",".trs":"trs"}
 
 
 def parse_args():
@@ -83,8 +83,8 @@ def main():
     t1 = time.perf_counter()
     exec_time = t1 - t0
     for r in result:
-        print(f"id:{r[0]} |  text:{r[1]}  |  score {r[2]}")
-    print("temps d'exécution:",np.round(exec_time,2))
+        print(f"{r[0]} | {r[1]} |  {r[2]}")
+    print("temps d'exécution de la requête Faiss:",np.round(exec_time,2))
 
 
 if __name__ == "__main__":

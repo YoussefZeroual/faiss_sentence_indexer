@@ -21,7 +21,7 @@ model_mapping = {
     "bge-m3":"BAAI/bge-m3"
     }
 
-MODEL_NAME =  model_mapping["camembert-base"]
+MODEL_NAME =  model_mapping["bge-m3"]
 
 # --- logging ---
 logging.basicConfig(

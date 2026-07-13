@@ -48,18 +48,68 @@ def parse_conllu_fast(file_path):
         sent_list.append(text_raw)
 
     return sent_list, metadata
+from lxml import etree
+import re
+import json
+
+
+def fix_punctuation_spaces(text):
+    # 1. Fix apostrophes (remove spaces around them)
+    text = re.sub(r"\s+'", "'", text)  # space before apostrophe
+    text = re.sub(r"'\s+", "'", text)  # space after apostrophe
+
+    # 2. Fix spaces before French punctuation (:, ;, ?, !, »)
+    text = re.sub(r'\s+([:;?!])', r'\1', text)  # Remove space before
+    text = re.sub(r'([:;?!])(\S)', r'\1 \2', text)  # Add space after if needed
+
+    # 3. Fix French guillemets (« »)
+    text = re.sub(r'\s+([»])', r'\1', text)  # Remove space before closing
+    text = re.sub(r'([«])\s+', r'\1 ', text)  # Add space after opening
+
+    # 4. Fix regular punctuation (.,)
+    text = re.sub(r'\s+([.,])', r'\1', text)  # Remove space before
+    text = re.sub(r'([.,])(\S)', r'\1 \2', text)  # Add space after
+
+    # 5. Clean up multiple spaces
+    text = re.sub(r'\s+', ' ', text)
+
+    return text.strip()
+
+
+def parse_sentences_xml_conllu(filepath):
+    data = None
+    with open(filepath,"r") as f:
+        data = f.read()
+    parser = etree.XMLParser(recover=True)
+    tree = etree.fromstring(data,parser=parser)
+    sentences = tree.xpath("//s")
+    len_s = len(sentences)
+    metadata = {"sent_id":[],
+                 "raw_text":[]}
+    sent_list = []
+    for s in sentences:
+        sent_id = s.get("id")
+        raw_text = re.findall(r'^\s*\S+\s+(\S+)', s.text, re.MULTILINE)
+        raw_text = " ".join(raw_text)
+        raw_text = fix_punctuation_spaces(raw_text)
+        metadata["sent_id"].append(sent_id)
+        metadata["raw_text"].append(raw_text)
+        sent_list.append(raw_text)
+    return sent_list,metadata
 
 def parse_sentences(file_path= None,mode = "conllu"):
-    if mode == "xml":
-        tree = etree.parse(file_path)
-        sentences = [s.itertext() for s in tree.iter("s")]
-        sentence_list = ["".join(s) for s in sentences]
-        return sentence_list
-    elif mode == "conllu":
-        from conllu import parse_incr
+    if mode == "conllu":
         t0 = time.perf_counter()
         logger.info("Parsing CONLLU sentences")
         sentence_list,metadata = parse_conllu_fast(file_path)
+        t1 = time.perf_counter()
+        ex_time = t1-t0
+        logger.info("Sentences parsed in %s seconds",np.round(ex_time,2))
+        return sentence_list
+    elif mode == "xml":
+        t0 = time.perf_counter()
+        logger.info("Parsing xml sentences")
+        sentence_list,metadata = parse_sentences_xml_conllu(file_path)
         t1 = time.perf_counter()
         ex_time = t1-t0
         logger.info("Sentences parsed in %s seconds",np.round(ex_time,2))

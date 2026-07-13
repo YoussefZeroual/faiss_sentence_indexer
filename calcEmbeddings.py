@@ -126,12 +126,12 @@ def parse_sentences(file_path= None,mode = "conllu"):
     elif mode == "xml":
         t0 = time.perf_counter()
         logger.info("Parsing xml sentences")
-        sentence_list,metadata = parse_sentences_xml_conllu(file_path)
+        sentences,metadata = parse_sentences_xml_conllu(file_path)
         len_s = len(sentences)
         t1 = time.perf_counter()
         ex_time = t1-t0
         logger.info("%s Sentences parsed in %s seconds",len_s,np.round(ex_time,2))
-        return sentence_list,metadata
+        return sentences,metadata
 
 
 def calcEMbeddings(collection_file_path=None, output_file_path=None, mode="conllu",reduce_precision=False):

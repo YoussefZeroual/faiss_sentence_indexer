@@ -82,7 +82,8 @@ def main():
     result = search(args.query, index, faiss.METRIC_INNER_PRODUCT, args.top_k, metadata)
     t1 = time.perf_counter()
     exec_time = t1 - t0
-    print(result)
+    for r in result:
+        print(f"id:{r[0]} |  text:{r[1]}  |  score {r[2]}")
     print("temps d'exécution:",np.round(exec_time,2))
 
 

@@ -1,13 +1,14 @@
 # -*- coding: utf-8 -*-
 #prend en argument le répertoire d'une collection du Lexiscoscope, et crée, pour chaque fichier XML, une liste d'embeddings (objet pickle).
 import time
-import logging 
+import logging
 import numpy as np
 import json
 from utils.embed_client import encode
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    filename='/home/miai_guest/zeroualy/module_faiss/app.log'
 )
 logger = logging.getLogger(__name__)
 logging.getLogger("faiss").setLevel(logging.WARNING)
@@ -78,23 +79,38 @@ def fix_punctuation_spaces(text):
 
 def parse_sentences_xml_conllu(filepath):
     data = None
-    with open(filepath,"r") as f:
+    with open(filepath,"rb") as f:
         data = f.read()
     parser = etree.XMLParser(recover=True)
     tree = etree.fromstring(data,parser=parser)
     sentences = tree.xpath("//s")
     len_s = len(sentences)
+    print(len_s)
     metadata = {"sent_id":[],
                  "raw_text":[]}
     sent_list = []
     for s in sentences:
         sent_id = s.get("id")
-        raw_text = re.findall(r'^\s*\S+\s+(\S+)', s.text, re.MULTILINE)
-        raw_text = " ".join(raw_text)
-        raw_text = fix_punctuation_spaces(raw_text)
+        if s.text is not None and "\n" in s.text and "\t" in s.text:
+            logger.warning("detected multiline text inside <s>, using contained CONLLU mode, sentence_id=%s,sentence=%s",sent_id,s.text)
+            raw_text = re.findall(r'^\s*\S+\s+(\S+)', s.text, re.MULTILINE)
+            raw_text = " ".join(raw_text)
+            raw_text = fix_punctuation_spaces(raw_text)
+            logger.warning("Parsed sentence: %s",s.text)
+
+        elif s.text is None:
+            logger.warning("Sentid=%s:<s> text is empty, looking for children texts",sent_id)
+            raw_text = "".join(s.itertext())
+            logger.warning("using s.itertext() : sentence=%s",raw_text)
+
+        else:
+            raw_text = s.text
+            logger.debug("Sentid %s, sent tex: %s",sent_id,raw_text)
+
         metadata["sent_id"].append(sent_id)
         metadata["raw_text"].append(raw_text)
         sent_list.append(raw_text)
+
     return sent_list,metadata
 
 def parse_sentences(file_path= None,mode = "conllu"):
@@ -131,13 +147,13 @@ def calcEMbeddings(collection_file_path=None, output_file_path=None, mode="conll
     else:
         np.save(output_file_path,embeddings)
     logger.info("saved successfully")
-    
+
     return embeddings,metadata
 def save_metadata(metadata,output_file=None):
     with open(output_file,"w",encoding="utf-8") as f:
         json.dump(metadata,f)
-        
+
 if __name__ == "__main__":
     input_file ="HS36-6030v2tv8.conllu"
-    
+
     embeddings = calcEMbeddings(input_file,"test_2.npy")

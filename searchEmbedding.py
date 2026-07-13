@@ -1,6 +1,6 @@
 import numpy as np
 import json
-import logging 
+import logging
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -14,11 +14,13 @@ from utils.embed_client import encode
 
 import faiss
 def load_index(index_file=None):
+    logger.info("loading index from:%s",index_file)
     if index_file is not None:
         return faiss.read_index(index_file)
     else:
         raise ValueError("file name empty")
 def load_metadata(matadata_file_path=None):
+    logger.info("loading metadata from:%s",matadata_file_path)
     metadata = None
     with open (matadata_file_path,"r") as f:
         metadata = json.load(f)
@@ -29,12 +31,18 @@ def load_metadata(matadata_file_path=None):
         raise ValueError("Couldnt load metadata")
 
 def embedd_query(query_str=None):
-
+    import time
+    t0 = time.perf_counter()
     if query_str is not None:
-        embeddings = encode([query_str])
+        logger.info("embedding query:%s",query_str)
+        embeddings = encode([query_str],chunk_size=1)
         import numpy as np
+        t1 = time.perf_counter()
+        exec_time = t1-t0
+        logger.info("Query encoded in %s seconds",np.round(exec_time,2))
         embeddings = np.array(embeddings,dtype=np.float32).reshape(1,-1)
         embeddings = np.ascontiguousarray(embeddings, dtype=np.float32)
+
         return embeddings
     else:
         logger.warning("Query is empty")

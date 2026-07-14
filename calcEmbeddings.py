@@ -74,9 +74,11 @@ def parse_conllu_fast(file_path):
         sent_list = []
         sent_id = None
         text_raw = None
-        for sent in raw_entries:
+        for i,sent in enumerate(raw_entries):
             text_raw = concat_forms(sent)
             sent_id = get_sent_id(sent)
+            if sent_id is None:
+                sent_id = i
             metadata["sent_id"].append(sent_id)
             metadata["raw_text"].append(text_raw)
             sent_list.append(text_raw)

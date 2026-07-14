@@ -60,7 +60,26 @@ def search(query_str, index=None, metric_type=None, top_k=10, metadata=None):
                for idx, distance in zip(indices[0], distances[0])
                if 0 <= idx < len_metadata]
     return matches
+def search_folder(input_folder=None,query_str=None,metric_type=faiss.METRIC_INNER_PRODUCT,top_k=10):
+    logger.info("Folder embedding search")
+    import glob
+    import os
 
+    file_list = glob.glob(input_folder+"/*"+"faiss")[:5]
+    len_f = len(file_list)
+    results = []
+    logger.info("Found %s files in folder",len_f)
+    for f in file_list:
+        base, ext = os.path.splitext(f)
+        logger.info("%s",f)
+        index = load_index(f)
+        metadata = load_metadata(base+".json")
+        result = search(query_str, index=index, metric_type=metric_type, top_k=top_k, metadata=metadata)
+        result = [(f,r[0],r[1],float(r[2]))
+               for r  in result]
+        results.extend(result)
+    for r in results:
+        print(f"{r[0]} | {r[1]} | {r[2]}")
 
 if __name__ == "__main__":
     import sys

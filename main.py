@@ -9,7 +9,7 @@ import numpy as np
 from calcEmbeddings import calcEMbeddings, save_metadata, parse_sentences,encode_folder
 from makeIndex import makeIndex
 from utils.embed_client import encode
-from searchEmbedding import search, load_metadata, load_index
+from searchEmbedding import search, load_metadata, load_index, search_folder
 
 MODE_BY_EXT = {".conllu": "conllu", ".xml": "xml",".trs":"trs"}
 
@@ -39,6 +39,8 @@ def main():
     if folder:
         print("Processing folder")
         encode_folder(input_file)
+        print("------------")
+        search_folder(input_file,query_str=args.query,metric_type=faiss.METRIC_INNER_PRODUCT,top_k=args.top_k)
         return True
     base, ext = os.path.splitext(input_file)
     mode = MODE_BY_EXT.get(ext.lower())

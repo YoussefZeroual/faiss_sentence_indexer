@@ -250,6 +250,8 @@ def encode_folder(input_folder=None):
         embeddings,metadata = calcEMbeddings(f,f.replace(ext,'npy'),ext)
         save_metadata(metadata,f.replace(ext,"json"))
         cnt +=1
+        if cnt>=5:
+            break
 if __name__ == "__main__":
     input_folder ="test"
     encode_folder(input_folder)

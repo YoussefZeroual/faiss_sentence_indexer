@@ -7,7 +7,7 @@ import faiss
 import numpy as np
 
 from calcEmbeddings import calcEMbeddings, save_metadata, parse_sentences,encode_folder
-from makeIndex import makeIndex
+from makeIndex import makeIndex,makeIndex_folder
 from utils.embed_client import encode
 from searchEmbedding import search, load_metadata, load_index, search_folder
 
@@ -39,6 +39,7 @@ def main():
     if folder:
         print("Processing folder")
         encode_folder(input_file)
+        makeIndex_folder(input_folder=input_file,metric_type=faiss.METRIC_INNER_PRODUCT,index_type="ivfpq")
         print("------------")
         search_folder(input_file,query_str=args.query,metric_type=faiss.METRIC_INNER_PRODUCT,top_k=args.top_k)
         return True

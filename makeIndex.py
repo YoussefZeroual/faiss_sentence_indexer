@@ -5,6 +5,7 @@ import numpy as np
 import json
 import logging 
 import glob
+import time
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -12,18 +13,16 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 def load_embeddings(embedding_file_path):
     embeddings = np.load(embedding_file_path)
-    import time
-    t0 = time.perf_counter()
     logger.info("making index for %s sentences",embeddings.shape[0])
     embeddings = np.ascontiguousarray(embeddings,dtype=np.float32)
     faiss.normalize_L2(embeddings)
-    n,dim = embeddings.shape
     return embeddings
 def makeIndex(embeddings=None,embedding_file_path=None,metric_type=None,index_type=None,output_file_path=None):
     if embeddings is None:
-       embeddings = load_emeddings(embedding_file_path)
+       embeddings = load_embeddings(embedding_file_path)
+    n,dim = embeddings.shape
     metric_type = metric_type
-    
+    t0 = time.perf_counter()
     if index_type == "flat":
         index = faiss.IndexFlat(dim,metric_type)
         index.add(embeddings)
@@ -40,12 +39,14 @@ def makeIndex(embeddings=None,embedding_file_path=None,metric_type=None,index_ty
         quantizer = faiss.IndexFlat(dim, metric_type)
         index = faiss.IndexIVFPQ(quantizer,dim,nlist,m,nbits,metric_type)
         if n < (2 ** nbits) * 40:
-            raise ValueError(f"Not enough training points ({n}) for IVFPQ (need ≥ {(2**nbits)*40} for nbits={nbits}); use 'flat' instead")
+            logger.warning("Not enough training points (%s) for IVFPQ (need ≥ {(2**nbits)*40} for nbits=%s); using 'flat' instead",n,nbits)
+            index = faiss.IndexFlat(dim,metric_type)
         index.train(embeddings)
         index.add(embeddings)
     else:
         logger.warning("Index Type unrecognized or empty: %s",index_type)
         raise ValueError(f"Index type unkown or empty: {index_type}")
+
     faiss.write_index(index,output_file_path)
     t1 = time.perf_counter()
     exec_time = t1-t0

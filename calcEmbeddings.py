@@ -4,6 +4,9 @@ import time
 import logging
 import numpy as np
 import json
+import glob
+from makeIndex import load_embeddings
+from searchEmbedding import load_metadata
 from utils.embed_client import encode
 logging.basicConfig(
     level=logging.INFO,
@@ -16,6 +19,21 @@ logging.getLogger("sentence_transformers").setLevel(logging.WARNING)
 logging.getLogger("httpx").setLevel(logging.WARNING)
 import conllu
 from lxml import etree
+
+#---- helper functions -
+def parse_conllu_raw_entries(file_content):
+    return [s.strip() for s in file_content.split('\n\n') if s.strip()]
+
+def concat_forms(text):
+    raw_text = re.findall(r'^\d+\s+(\S+)', text, re.MULTILINE)
+    raw_text = " ".join(raw_text)
+    raw_text = fix_punctuation_spaces(raw_text)
+    return raw_text
+def get_sent_id(text):
+    match = re.search(r'^#sent_id\s*=\s*(\S+)', text, re.MULTILINE)
+    return match.group(1) if match else None
+
+#--------parsing functions------
 def parse_conllu_fast(file_path):
     metadata = {"sent_id": [], "raw_text": []}
     sent_list = []
@@ -23,32 +41,51 @@ def parse_conllu_fast(file_path):
     text_raw = None
 
     with open(file_path, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.rstrip("\n")
-            if line.startswith("#"):
-                # normalize: strip '#', split on first '=', strip whitespace on both sides
-                key_value = line[1:].split("=", 1)
-                if len(key_value) != 2:
-                    continue
-                key, value = key_value[0].strip(), key_value[1].strip()
-                if key == "sent_id":
-                    sent_id = value
-                elif key == "text_raw":
-                    text_raw = value
-            elif line == "":  # blank line = end of sentence block
-                if sent_id is not None:
-                    metadata["sent_id"].append(sent_id)
-                    metadata["raw_text"].append(text_raw)
-                    sent_list.append(text_raw)
-                sent_id, text_raw = None, None
+        content = f.read()
+
+    for line in content.splitlines():
+        line = line.rstrip("\n")
+        if line.startswith("#"):
+            # normalize: strip '#', split on first '=', strip whitespace on both sides
+            key_value = line[1:].split("=", 1)
+            if len(key_value) != 2:
+                continue
+            key, value = key_value[0].strip(), key_value[1].strip()
+            if key == "sent_id":
+                sent_id = value
+            elif key == "text_raw":
+                text_raw = value
+        elif line == "":  # blank line = end of sentence block
+            if sent_id is not None:
+                metadata["sent_id"].append(sent_id)
+                metadata["raw_text"].append(text_raw)
+                sent_list.append(text_raw)
+            sent_id, text_raw = None, None
+
 
     # catch the last sentence if file doesn't end with a blank line
     if sent_id is not None:
         metadata["sent_id"].append(sent_id)
         metadata["raw_text"].append(text_raw)
         sent_list.append(text_raw)
-
+    #check if the raw text is empty to fallback to 2nd parsing method
+    if sum(x is None for x in sent_list) >= 5:
+        logger.warning("sent_list has 5 None entries, falling back to form concatenation method")
+        raw_entries = parse_conllu_raw_entries(content)
+        metadata = {"sent_id": [], "raw_text": []}
+        sent_list = []
+        sent_id = None
+        text_raw = None
+        for sent in raw_entries:
+            text_raw = concat_forms(sent)
+            sent_id = get_sent_id(sent)
+            metadata["sent_id"].append(sent_id)
+            metadata["raw_text"].append(text_raw)
+            sent_list.append(text_raw)
     return sent_list, metadata
+
+
+
 from lxml import etree
 import re
 import json
@@ -166,13 +203,20 @@ def parse_sentences(file_path= None,mode = "conllu"):
         return sentences,metadata
 
 
-def calcEMbeddings(collection_file_path=None, output_file_path=None, mode="conllu",reduce_precision=False):
-    logger.info("parsing sentences, mode=%s",mode)
+def calcEMbeddings(collection_file_path=None, output_file_path=None, mode="conllu",reduce_precision=False,overwrite=False):
+    import os
+    base, ext = os.path.splitext(collection_file_path)
+    if (not overwrite) and os.path.exists(base+".npy") and os.path.exists(base+".json"):
+        logger.warning("embedding file and metadata file already exist, loading from %s and %s",base+".npy",base+".json")
+        embeddings = load_embeddings(base+".npy")
+        metadata= load_metadata(base+".json")
+        return embeddings,metadata
+    logger.info("parsing sentences, file=%s mode=%s",collection_file_path,mode)
     sentence_list,metadata = parse_sentences(collection_file_path,mode=mode)
     logger.info("Encoding sentences with model")
     import time
     t0 = time.perf_counter()
-    embeddings = encode(sentence_list, chunk_size=10000)
+    embeddings = encode(sentence_list, chunk_size=500)
     t1 = time.perf_counter()
     procession_time = t1-t0
     logger.info("Embeddings created in %s seconds",np.round(procession_time,2))
@@ -185,10 +229,27 @@ def calcEMbeddings(collection_file_path=None, output_file_path=None, mode="conll
 
     return embeddings,metadata
 def save_metadata(metadata,output_file=None):
+    logger.info("saving metadata")
     with open(output_file,"w",encoding="utf-8") as f:
         json.dump(metadata,f)
 
+def encode_folder(input_folder=None):
+    extensions = [".conllu",".xml",".trs"]
+    file_list = []
+    for ext in extensions:
+        file_list.extend(glob.glob(input_folder+"/*"+ext))
+    len_f = len(file_list)
+    logger.info("Found %s files in folder",len_f)
+    found_extentions = [re.findall(r'\.([^.]+)$', f)[0] for f in file_list]
+    logger.info("Found formats: %s",list(set(found_extentions)))
+    cnt = 1
+    for f in file_list:
+        logger.info("%s",f)
+    for f,ext in zip(file_list,found_extentions):
+        logger.info("Encoding file %s/%s filename=%s",cnt,len_f,f)
+        embeddings,metadata = calcEMbeddings(f,f.replace(ext,'npy'),ext)
+        save_metadata(metadata,f.replace(ext,"json"))
+        cnt +=1
 if __name__ == "__main__":
-    input_file ="HS36-6030v2tv8.conllu"
-
-    embeddings = calcEMbeddings(input_file,"test_2.npy")
+    input_folder ="test"
+    encode_folder(input_folder)

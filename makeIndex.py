@@ -4,21 +4,24 @@ import faiss
 import numpy as np
 import json
 import logging 
+import glob
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
-
-def makeIndex(embeddings=None,embedding_file_path=None,metric_type=None,index_type=None,output_file_path=None):
-    if embeddings is None:
-        embeddings = np.load(embedding_file_path)
+def load_embeddings(embedding_file_path):
+    embeddings = np.load(embedding_file_path)
     import time
     t0 = time.perf_counter()
     logger.info("making index for %s sentences",embeddings.shape[0])
     embeddings = np.ascontiguousarray(embeddings,dtype=np.float32)
     faiss.normalize_L2(embeddings)
     n,dim = embeddings.shape
+    return embeddings
+def makeIndex(embeddings=None,embedding_file_path=None,metric_type=None,index_type=None,output_file_path=None):
+    if embeddings is None:
+       embeddings = load_emeddings(embedding_file_path)
     metric_type = metric_type
     
     if index_type == "flat":
@@ -51,9 +54,17 @@ def makeIndex(embeddings=None,embedding_file_path=None,metric_type=None,index_ty
     
     
     return index
+def makeIndex_folder(input_folder=None,metric_type=None,index_type=None):
+    file_list = glob.glob(input_folder+"/*"+"npy")
+    len_f = len(file_list)
+    logger.info("Found %s files in folder",len_f)
+    for f in file_list:
+        logger.info("%s",f)
+    for f in file_list:
+        logger.info("Making index for file %s",f)
+        output_file_path = f.replace(".npy",".faiss")
+        index = makeIndex(embedding_file_path=f,metric_type=metric_type,index_type=index_type,output_file_path=output_file_path)
+
 
 if __name__ == "__main__":
-    from calcEmbeddings import calcEMbeddings
-    input_file ="HS36-6030v2tv8.conllu"
-    embedding_file_path = "test_2.npy"
-    index = makeIndex(embedding_file_path=embedding_file_path,metric_type=faiss.METRIC_INNER_PRODUCT,index_type="ivfpq",output_file_path="index.faiss")
+    index = makeIndex_folder("test")

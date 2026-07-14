@@ -6,7 +6,7 @@ import sys
 import faiss
 import numpy as np
 
-from calcEmbeddings import calcEMbeddings, save_metadata, parse_sentences
+from calcEmbeddings import calcEMbeddings, save_metadata, parse_sentences,encode_folder
 from makeIndex import makeIndex
 from utils.embed_client import encode
 from searchEmbedding import search, load_metadata, load_index
@@ -25,19 +25,24 @@ def parse_args():
                          help="Save embeddings as float16 to save disk space")
     parser.add_argument("--force", action="store_true",
                          help="Force recomputation of embeddings/metadata/index even if cached files exist")
+    parser.add_argument("--folder", action="store_true",
+                         help="process a folder")
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
     input_file = args.input_file
-
+    folder = args.folder
     if not os.path.exists(input_file):
         sys.exit(f"Error: input file not found: {input_file}")
-
+    if folder:
+        print("Processing folder")
+        encode_folder(input_file)
+        return True
     base, ext = os.path.splitext(input_file)
     mode = MODE_BY_EXT.get(ext.lower())
-    if mode is None:
+    if (mode is None) and (not folder):
         sys.exit(f"Error: unsupported file extension '{ext}' (expected one of {list(MODE_BY_EXT)})")
 
     output_index = base + ".faiss"
@@ -56,6 +61,7 @@ def main():
 
     # Index must be rebuilt whenever embeddings were recomputed, not just when it's missing on disk.
     index_missing = args.force or embeddings_missing or not os.path.exists(output_index)
+
 
     if index_missing:
         try:

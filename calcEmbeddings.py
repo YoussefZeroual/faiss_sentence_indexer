@@ -42,7 +42,6 @@ def parse_conllu_fast(file_path):
 
     with open(file_path, "r", encoding="utf-8") as f:
         content = f.read()
-
     for line in content.splitlines():
         line = line.rstrip("\n")
         if line.startswith("#"):
@@ -61,15 +60,14 @@ def parse_conllu_fast(file_path):
                 metadata["raw_text"].append(text_raw)
                 sent_list.append(text_raw)
             sent_id, text_raw = None, None
-
-
     # catch the last sentence if file doesn't end with a blank line
     if sent_id is not None:
         metadata["sent_id"].append(sent_id)
         metadata["raw_text"].append(text_raw)
         sent_list.append(text_raw)
+
     #check if the raw text is empty to fallback to 2nd parsing method
-    if sum(x is None for x in sent_list) >= 5:
+    if (sent_list == []) or (sum(x is None for x in sent_list) >= 5):
         logger.warning("sent_list has 5 None entries, falling back to form concatenation method")
         raw_entries = parse_conllu_raw_entries(content)
         metadata = {"sent_id": [], "raw_text": []}
@@ -233,7 +231,7 @@ def save_metadata(metadata,output_file=None):
     with open(output_file,"w",encoding="utf-8") as f:
         json.dump(metadata,f)
 
-def encode_folder(input_folder=None):
+def encode_folder(input_folder=None,overwrite=False):
     extensions = [".conllu",".xml",".trs"]
     file_list = []
     for ext in extensions:
@@ -247,7 +245,7 @@ def encode_folder(input_folder=None):
         logger.info("%s",f)
     for f,ext in zip(file_list,found_extentions):
         logger.info("Encoding file %s/%s filename=%s",cnt,len_f,f)
-        embeddings,metadata = calcEMbeddings(f,f.replace(ext,'npy'),ext)
+        embeddings,metadata = calcEMbeddings(f,f.replace(ext,'npy'),ext,overwrite=overwrite)
         save_metadata(metadata,f.replace(ext,"json"))
         cnt +=1
 if __name__ == "__main__":

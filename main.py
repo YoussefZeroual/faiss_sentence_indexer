@@ -9,8 +9,8 @@ import numpy as np
 from calcEmbeddings import calcEMbeddings, save_metadata, parse_sentences,encode_folder
 from makeIndex import makeIndex,makeIndex_folder
 from utils.embed_client import encode
-from searchEmbedding import search, load_metadata, load_index, search_folder
-
+from searchEmbedding import search, load_metadata, load_index, search_folder,embedd_query
+import logging
 MODE_BY_EXT = {".conllu": "conllu", ".xml": "xml",".trs":"trs"}
 
 
@@ -27,6 +27,7 @@ def parse_args():
                          help="Force recomputation of embeddings/metadata/index even if cached files exist")
     parser.add_argument("--folder", action="store_true",
                          help="process a folder")
+    parser.add_argument("--nolog",action="store_true",help="disables logging info")
     return parser.parse_args()
 
 
@@ -34,14 +35,17 @@ def main():
     args = parse_args()
     input_file = args.input_file
     folder = args.folder
+    if args.nolog:
+        logging.disable(logging.WARNING)
     if not os.path.exists(input_file):
         sys.exit(f"Error: input file not found: {input_file}")
     if folder:
+        query_vector = embedd_query(args.query)
         print("Processing folder")
-        encode_folder(input_file)
-        makeIndex_folder(input_folder=input_file,metric_type=faiss.METRIC_INNER_PRODUCT,index_type="ivfpq")
+        encode_folder(input_file,overwrite=args.force)
+        makeIndex_folder(input_folder=input_file,metric_type=faiss.METRIC_INNER_PRODUCT,index_type="ivfpq",overwrite=args.force)
         print("------------")
-        search_folder(input_file,query_str=args.query,metric_type=faiss.METRIC_INNER_PRODUCT,top_k=args.top_k)
+        search_folder(input_file,query_vector=query_vector,metric_type=faiss.METRIC_INNER_PRODUCT,top_k=args.top_k)
         return True
     base, ext = os.path.splitext(input_file)
     mode = MODE_BY_EXT.get(ext.lower())
@@ -88,7 +92,7 @@ def main():
                  f"Re-run with --force to rebuild.")
     import time
     t0 = time.perf_counter()
-    result = search(args.query, index, faiss.METRIC_INNER_PRODUCT, args.top_k, metadata)
+    result = search(query_str=args.query, index=index, metric_type=faiss.METRIC_INNER_PRODUCT, top_k=args.top_k, metadata=metadata)
     t1 = time.perf_counter()
     exec_time = t1 - t0
     for r in result:

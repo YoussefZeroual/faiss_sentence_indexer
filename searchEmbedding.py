@@ -48,10 +48,13 @@ def embedd_query(query_str=None):
         logger.warning("Query is empty")
         raise ValueError("Query is empty")
 
-def search(query_str, index=None, metric_type=None, top_k=10, metadata=None):
+def search(query_vector=None,query_str=None, index=None, metric_type=None, top_k=10, metadata=None):
     metadata = metadata
     len_metadata = len(metadata["raw_text"])
-    query_vector = embedd_query(query_str)
+    if query_vector is not None:
+        query_vector =query_vector
+    else:
+        query_vector = embedd_query(query_str)
     faiss.normalize_L2(query_vector)
     if hasattr(index, "nprobe"):
         index.nprobe = 8
@@ -60,7 +63,7 @@ def search(query_str, index=None, metric_type=None, top_k=10, metadata=None):
                for idx, distance in zip(indices[0], distances[0])
                if 0 <= idx < len_metadata]
     return matches
-def search_folder(input_folder=None,query_str=None,metric_type=faiss.METRIC_INNER_PRODUCT,top_k=10):
+def search_folder(input_folder=None,query_str=None,query_vector=None,metric_type=faiss.METRIC_INNER_PRODUCT,top_k=10):
     import time
     t0 = time.perf_counter()
     logger.info("Folder embedding search")
@@ -68,7 +71,6 @@ def search_folder(input_folder=None,query_str=None,metric_type=faiss.METRIC_INNE
     import os
 
     file_list = glob.glob(input_folder+"/*"+"faiss")
-    print("file list" ,file_list)
     len_f = len(file_list)
     results = []
     logger.info("Found %s files in folder",len_f)
@@ -77,10 +79,12 @@ def search_folder(input_folder=None,query_str=None,metric_type=faiss.METRIC_INNE
         logger.info("%s",f)
         index = load_index(f)
         metadata = load_metadata(base+".json")
-        result = search(query_str, index=index, metric_type=metric_type, top_k=top_k, metadata=metadata)
+        result = search(query_str=query_str,query_vector=query_vector, index=index, metric_type=metric_type, top_k=top_k, metadata=metadata)
         result = [(f,r[0],r[1],float(r[2]))
                for r  in result]
         results.extend(result)
+    results.sort(key=lambda x: x[3],reverse=True)
+    results = results[:top_k]
     t1 = time.perf_counter()
     exec_time = t1-t0
     logger.info("Folder search executed in %s seconds in %s files",np.round(exec_time,2),len_f)

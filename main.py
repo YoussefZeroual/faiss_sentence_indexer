@@ -27,7 +27,9 @@ def parse_args():
                          help="Force recomputation of embeddings/metadata/index even if cached files exist")
     parser.add_argument("--folder", action="store_true",
                          help="process a folder")
-    parser.add_argument("--nolog",action="store_true",help="disables logging info")
+    parser.add_argument("--log",action="store_true",help="disables logging info")
+    parser.add_argument("--encode_only",action="store_true",help="encodes files and creates indexes without running queries (only in folder mode)")
+    parser.add_argument("--search_only",action="store_true",help="searches presuming index files already exist to skip checking and improve speed (only in folder mode)")
     return parser.parse_args()
 
 
@@ -35,15 +37,25 @@ def main():
     args = parse_args()
     input_file = args.input_file
     folder = args.folder
-    if args.nolog:
+    if not args.log:
         logging.disable(logging.WARNING)
     if not os.path.exists(input_file):
         sys.exit(f"Error: input file not found: {input_file}")
+    if args.encode_only and folder:
+        encode_folder(input_file,overwrite=args.force)
+        makeIndex_folder(input_folder=input_file,metric_type=faiss.METRIC_INNER_PRODUCT,index_type="ivfpq",overwrite=args.force)
+        return True
+    if args.search_only and folder:
+        query_vector = embedd_query(args.query)
+        print("Processing folder")
+        search_folder(input_file,query_vector=query_vector,metric_type=faiss.METRIC_INNER_PRODUCT,top_k=args.top_k)
+        return True
     if folder:
         query_vector = embedd_query(args.query)
         print("Processing folder")
-        encode_folder(input_file,overwrite=args.force)
-        makeIndex_folder(input_folder=input_file,metric_type=faiss.METRIC_INNER_PRODUCT,index_type="ivfpq",overwrite=args.force)
+        if args.force:
+            encode_folder(input_file,overwrite=True)
+            makeIndex_folder(input_folder=input_file,metric_type=faiss.METRIC_INNER_PRODUCT,index_type="ivfpq",overwrite=True)
         print("------------")
         search_folder(input_file,query_vector=query_vector,metric_type=faiss.METRIC_INNER_PRODUCT,top_k=args.top_k)
         return True

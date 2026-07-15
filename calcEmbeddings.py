@@ -6,7 +6,7 @@ import numpy as np
 import json
 import glob
 from makeIndex import load_embeddings
-from searchEmbedding import load_metadata
+from searchEmbedding import load_metadata,load_index
 from utils.embed_client import encode
 logging.basicConfig(
     level=logging.INFO,
@@ -206,11 +206,12 @@ def parse_sentences(file_path= None,mode = "conllu"):
 def calcEMbeddings(collection_file_path=None, output_file_path=None, mode="conllu",reduce_precision=False,overwrite=False):
     import os
     base, ext = os.path.splitext(collection_file_path)
-    if (not overwrite) and os.path.exists(base+".npy") and os.path.exists(base+".json"):
+    if (not overwrite) and  (os.path.exists(base+".npy")) and os.path.exists(base+".json"):
         logger.warning("embedding file and metadata file already exist, loading from %s and %s",base+".npy",base+".json")
         embeddings = load_embeddings(base+".npy")
         metadata= load_metadata(base+".json")
         return embeddings,metadata
+
     logger.info("parsing sentences, file=%s mode=%s",collection_file_path,mode)
     sentence_list,metadata = parse_sentences(collection_file_path,mode=mode)
     logger.info("Encoding sentences with model")

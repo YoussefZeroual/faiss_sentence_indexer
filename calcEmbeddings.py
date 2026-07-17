@@ -24,11 +24,31 @@ from lxml import etree
 def parse_conllu_raw_entries(file_content):
     return [s.strip() for s in file_content.split('\n\n') if s.strip()]
 
+def is_amalgame(line):
+    return "".join(re.findall(r'^\d\-\d',line)) if re.findall(r'^\d\-\d',line) else None
+def has_amalgams(text):
+    lines_ = [l if re.findall(r'^\d\-\d',l) else None for l in text.split("\n") ]
+    if set(lines_) == {None}:
+        return False
+    else:
+        return True
 def concat_forms(text):
-    raw_text = re.findall(r'^\d+\s+(\S+)', text, re.MULTILINE)
-    raw_text = " ".join(raw_text)
-    raw_text = fix_punctuation_spaces(raw_text)
+    tokens = []
+    print(has_amalgams(text))
+    if has_amalgams(text):
+        lines = text.split('\n')
+        for i,t in enumerate(lines):
+            if (not is_amalgame(lines[i-2])) and (not is_amalgame(lines[i-1])):
+                tokens.append(t)
+                raw_text = "\n".join(tokens)
+        raw_text = re.findall(r'^\d\-d|\d+\s+(\S+)', raw_text, re.MULTILINE)
+        raw_text = " ".join(raw_text)
+    else:
+        raw_text = re.findall(r'^\d+\s+(\S+)', text, re.MULTILINE)
+        raw_text = " ".join(raw_text)
+        raw_text = fix_punctuation_spaces(raw_text)
     return raw_text
+
 def get_sent_id(text):
     match = re.search(r'^#sent_id\s*=\s*(\S+)', text, re.MULTILINE)
     return match.group(1) if match else None
@@ -68,7 +88,7 @@ def parse_conllu_fast(file_path):
 
     #check if the raw text is empty to fallback to 2nd parsing method
     if (sent_list == []) or (sum(x is None for x in sent_list) >= 5):
-        logger.warning("sent_list has 5 None entries, falling back to form concatenation method")
+        logger.warning("sent_list has None entries, falling back to form concatenation method")
         raw_entries = parse_conllu_raw_entries(content)
         metadata = {"sent_id": [], "raw_text": []}
         sent_list = []

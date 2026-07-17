@@ -11,7 +11,7 @@ from makeIndex import makeIndex,makeIndex_folder
 from utils.embed_client import encode
 from searchEmbedding import search, load_metadata, load_index, search_folder,embedd_query
 import logging
-MODE_BY_EXT = {".conllu": "conllu", ".xml": "xml",".trs":"trs"}
+MODE_BY_EXT = {".conllu": "conllu", ".xml": "xml",".trs":"trs",".faiss":"faiss"}
 
 
 def parse_args():
@@ -37,6 +37,13 @@ def main():
     args = parse_args()
     input_file = args.input_file
     folder = args.folder
+    base, ext = os.path.splitext(input_file)
+    output_index = base + ".faiss"
+    output_metadata = base + ".json"
+    output_embeddings = base + ".npy"
+    # Index must be rebuilt whenever embeddings were recomputed, not just when it's missing on disk.
+    embeddings_missing = args.force or not os.path.exists(output_embeddings) or not os.path.exists(output_metadata)
+    index_missing = args.force or (embeddings_missing) and (not os.path.exists(output_index))
     if not args.log:
         logging.disable(logging.WARNING)
     if not os.path.exists(input_file):
@@ -59,27 +66,21 @@ def main():
         print("------------")
         search_folder(input_file,query_vector=query_vector,metric_type=faiss.METRIC_INNER_PRODUCT,top_k=args.top_k)
         return True
-    base, ext = os.path.splitext(input_file)
+
     mode = MODE_BY_EXT.get(ext.lower())
-    if (mode is None) and (not folder):
+    if embeddings_missing and not index_missing and not args.force:
+        index = load_index(output_index)
+        metadata = load_metadata(output_metadata)
+    elif (mode is None) and (not folder) and (embeddings_missing) and (index_missing):
         sys.exit(f"Error: unsupported file extension '{ext}' (expected one of {list(MODE_BY_EXT)})")
 
-    output_index = base + ".faiss"
-    output_metadata = base + ".json"
-    output_embeddings = base + ".npy"
-
-    embeddings_missing = args.force or not os.path.exists(output_embeddings) or not os.path.exists(output_metadata)
-
-    if embeddings_missing:
+    elif embeddings_missing and index_missing:
         embeddings, metadata = calcEMbeddings(input_file, output_embeddings, mode,
-                                               reduce_precision=args.reduce_precision)
+                                               reduce_precision=args.reduce_precision,overwrite=args.force)
         save_metadata(metadata, output_metadata)
     else:
         embeddings = np.load(output_embeddings)
         metadata = load_metadata(output_metadata)
-
-    # Index must be rebuilt whenever embeddings were recomputed, not just when it's missing on disk.
-    index_missing = args.force or embeddings_missing or not os.path.exists(output_index)
 
 
     if index_missing:

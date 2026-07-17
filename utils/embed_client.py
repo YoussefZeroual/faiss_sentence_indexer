@@ -13,6 +13,7 @@ def _try_connect():
     try:
         return Client(("localhost", 6000))
     except (ConnectionRefusedError, OSError):
+        print("couldnt connect to daemon")
         return None
 
 

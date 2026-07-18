@@ -5,6 +5,11 @@ import logging
 import numpy as np
 import json
 import glob
+import re
+from lxml import etree
+import time
+import json
+import os
 from makeIndex import load_embeddings
 from searchEmbedding import load_metadata,load_index
 from utils.embed_client import encode
@@ -34,7 +39,7 @@ def has_amalgams(text):
         return True
 def concat_forms(text):
     tokens = []
-    print(has_amalgams(text))
+
     if has_amalgams(text):
         lines = text.split('\n')
         for i,t in enumerate(lines):
@@ -52,16 +57,17 @@ def concat_forms(text):
 def get_sent_id(text):
     match = re.search(r'^#sent_id\s*=\s*(\S+)', text, re.MULTILINE)
     return match.group(1) if match else None
-
 #--------parsing functions------
-def parse_conllu_fast(file_path):
+def parse_conllu_fast(file_path,text=None):
     metadata = {"sent_id": [], "raw_text": []}
     sent_list = []
     sent_id = None
     text_raw = None
-
-    with open(file_path, "r", encoding="utf-8") as f:
-        content = f.read()
+    if text is not None:
+        content = text
+    else:
+        with open(file_path, "r", encoding="utf-8") as f:
+            content = f.read()
     for line in content.splitlines():
         line = line.rstrip("\n")
         if line.startswith("#"):
@@ -106,10 +112,6 @@ def parse_conllu_fast(file_path):
 
 
 
-from lxml import etree
-import re
-import json
-
 
 def fix_punctuation_spaces(text):
     # 1. Fix apostrophes (remove spaces around them)
@@ -142,7 +144,6 @@ def parse_sentences_xml_conllu(filepath):
     tree = etree.fromstring(data,parser=parser)
     sentences = tree.xpath("//s")
     len_s = len(sentences)
-    print(len_s)
     metadata = {"sent_id":[],
                  "raw_text":[]}
     sent_list = []
@@ -150,8 +151,7 @@ def parse_sentences_xml_conllu(filepath):
         sent_id = s.get("id")
         if s.text is not None and "\n" in s.text and "\t" in s.text:
             logger.warning("detected multiline text inside <s>, using contained CONLLU mode, sentence_id=%s,sentence=%s",sent_id,s.text)
-            raw_text = re.findall(r'^\s*\S+\s+(\S+)', s.text, re.MULTILINE)
-            raw_text = " ".join(raw_text)
+            raw_text = concat_forms(s.text)
             raw_text = fix_punctuation_spaces(raw_text)
             logger.warning("Parsed sentence: %s",s.text)
 
@@ -167,7 +167,6 @@ def parse_sentences_xml_conllu(filepath):
         metadata["sent_id"].append(sent_id)
         metadata["raw_text"].append(raw_text)
         sent_list.append(raw_text)
-
     return sent_list,metadata
 def parse_sentence_trs(file_path=None):
     logger.info("mode is trs")
@@ -178,7 +177,6 @@ def parse_sentence_trs(file_path=None):
     tree = etree.fromstring(data,parser=parser)
     sentences = tree.xpath("//Turn")
     len_s = len(sentences)
-    print(len_s)
     metadata = {"sent_id":[],
                  "raw_text":[]}
     sent_list = []
@@ -197,34 +195,41 @@ def parse_sentences(file_path= None,mode = "conllu"):
     if mode == "conllu":
         t0 = time.perf_counter()
         logger.info("Parsing CONLLU sentences")
-        sentence_list,metadata = parse_conllu_fast(file_path)
+        sent_list,metadata = parse_conllu_fast(file_path)
+        len_s = len(sent_list)
+        sent_list = [sent if sent is not None else "[phrase manquante]" for sent in sent_list]
+        n_tokens = sum(len(re.findall(r'\w+|[^\w\s]', sent)) for sent in sent_list if sent !="[phrase manquante]")
         t1 = time.perf_counter()
-        len_s = len(sentence_list)
         ex_time = t1-t0
-        logger.info("%s Sentences parsed in %s seconds",len_s,np.round(ex_time,2))
-        return sentence_list,metadata
+        logger.info("Parsed %s sentences, %s tokens in %s seconds",len_s,n_tokens,np.round(ex_time,2))
+        return sent_list,metadata
     elif mode == "xml":
         t0 = time.perf_counter()
         logger.info("Parsing xml sentences")
-        sentences,metadata = parse_sentences_xml_conllu(file_path)
-        len_s = len(sentences)
+        sent_list,metadata = parse_sentences_xml_conllu(file_path)
+        len_s = len(sent_list)
+        sent_list = [sent if sent is not None else "[phrase manquante]" for sent in sent_list]
+        n_tokens = sum(len(re.findall(r'\w+|[^\w\s]', sent)) for sent in sent_list if sent !="[phrase manquante]")
         t1 = time.perf_counter()
         ex_time = t1-t0
-        logger.info("%s Sentences parsed in %s seconds",len_s,np.round(ex_time,2))
-        return sentences,metadata
+        logger.info("Parsed %s sentences, %s tokens in %s seconds",len_s,n_tokens,np.round(ex_time,2))
+        return sent_list,metadata
     elif mode == "trs":
         t0 = time.perf_counter()
         logger.info("Parsing trs sentences")
-        sentences,metadata = parse_sentence_trs(file_path)
-        len_s = len(sentences)
+        sent_list,metadata = parse_sentence_trs(file_path)
+        len_s = len(sent_list)
+        sent_list = [sent if sent is not None else "[phrase manquante]" for sent in sent_list]
+        n_tokens = sum(len(re.findall(r'\w+|[^\w\s]', sent)) for sent in sent_list if sent !="[phrase manquante]")
         t1 = time.perf_counter()
         ex_time = t1-t0
-        logger.info("%s Sentences parsed in %s seconds",len_s,np.round(ex_time,2))
-        return sentences,metadata
+        logger.info("Parsed %s sentences, %s tokens in %s seconds",len_s,n_tokens,np.round(ex_time,2))
+
+        return sent_list,metadata
 
 
 def calcEMbeddings(collection_file_path=None, output_file_path=None, mode="conllu",reduce_precision=False,overwrite=False):
-    import os
+
     base, ext = os.path.splitext(collection_file_path)
     if (not overwrite) and  (os.path.exists(base+".npy")) and os.path.exists(base+".json"):
         logger.warning("embedding file and metadata file already exist, loading from %s and %s",base+".npy",base+".json")
@@ -235,7 +240,7 @@ def calcEMbeddings(collection_file_path=None, output_file_path=None, mode="conll
     logger.info("parsing sentences, file=%s mode=%s",collection_file_path,mode)
     sentence_list,metadata = parse_sentences(collection_file_path,mode=mode)
     logger.info("Encoding sentences with model")
-    import time
+
     t0 = time.perf_counter()
     embeddings = encode(sentence_list, chunk_size=500)
     t1 = time.perf_counter()

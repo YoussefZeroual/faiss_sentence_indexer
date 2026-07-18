@@ -5,7 +5,13 @@ import sys
 import time
 import uuid
 from multiprocessing.connection import Client, Listener
-
+import logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    #filename='/home/miai_guest/zeroualy/module_faiss/app.log'
+)
+logger = logging.getLogger(__name__)
 DAEMON_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "embed_daemon.py")
 
 
@@ -13,11 +19,11 @@ def _try_connect():
     try:
         return Client(("localhost", 6000))
     except (ConnectionRefusedError, OSError):
-        print("couldnt connect to daemon")
         return None
 
 
 def _start_daemon():
+    logger.info("starting embedding daemon")
     subprocess.Popen(
         [sys.executable, DAEMON_SCRIPT],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,

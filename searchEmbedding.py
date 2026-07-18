@@ -63,7 +63,7 @@ def search(query_vector=None,query_str=None, index=None, metric_type=None, top_k
                for idx, distance in zip(indices[0], distances[0])
                if 0 <= idx < len_metadata]
     return matches
-def search_folder(input_folder=None,query_str=None,query_vector=None,metric_type=faiss.METRIC_INNER_PRODUCT,top_k=10):
+def search_folder(input_folder=None,query_str=None,query_vector=None,metric_type=faiss.METRIC_INNER_PRODUCT,top_k=10,verbose=True):
     import time
     t0 = time.perf_counter()
     logger.info("Folder embedding search")
@@ -74,6 +74,11 @@ def search_folder(input_folder=None,query_str=None,query_vector=None,metric_type
     len_f = len(file_list)
     results = []
     logger.info("Found %s files in folder",len_f)
+    if query_vector is not None:
+        query_vector =query_vector
+    else:
+        query_vector = embedd_query(query_str)
+    faiss.normalize_L2(query_vector)
     for f in file_list:
         base, ext = os.path.splitext(f)
         logger.info("%s",f)
@@ -88,8 +93,9 @@ def search_folder(input_folder=None,query_str=None,query_vector=None,metric_type
     t1 = time.perf_counter()
     exec_time = t1-t0
     logger.info("Folder search executed in %s seconds in %s files",np.round(exec_time,2),len_f)
-    for r in results:
-        print(f"{r[0]} | {r[1]} | {r[2]} | {r[3]}")
+    if verbose:
+        for r in results:
+            print(f"{r[0]} | {r[1]} | {r[2]} | {r[3]}")
 
 if __name__ == "__main__":
     import sys

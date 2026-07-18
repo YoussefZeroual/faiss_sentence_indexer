@@ -1,19 +1,20 @@
 #!/usr/bin/env python3
 import logging
+import queue
 import sys
+import threading
+import time
 from multiprocessing.connection import Listener
 
 import numpy as np
 from sentence_transformers import SentenceTransformer
 
-model_mapping = {
-    "camembert-base": "dangvantuan/sentence-camembert-base",
-    "bge-m3": "BAAI/bge-m3",
-}
+MODEL_NAME = "BAAI/bge-m3"
+HOST, PORT = "localhost", 6000
+BACKLOG = 256           # pending TCP connections allowed to queue at OS level
+MAX_BATCH_SIZE = 256    # sentences per GPU encode() call
+BATCH_WINDOW_S = 0.015  # collect window before dispatching a batch (15ms)
 
-MODEL_NAME = model_mapping["bge-m3"]
-
-# --- logging (stdout only) ---
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -21,19 +22,85 @@ logging.basicConfig(
 )
 logger = logging.getLogger("embed_daemon")
 
+model = None
+batch_queue: "queue.Queue" = queue.Queue()  # items: (sentences_list, result_queue)
 
-def main():
-    logger.info("Daemon starting")
 
-    logger.info("Loading model...")
-    model = SentenceTransformer(MODEL_NAME)
-    logger.info("Model loaded successfully")
+def batching_worker():
+    """Single thread owns the GPU. Pulls whatever chunks are waiting,
+    concatenates them into one encode() call, splits results back out."""
+    while True:
+        sentences, result_q = batch_queue.get()  # blocks for first item
+        batch_items = [(sentences, result_q)]
+        batch_sentences = list(sentences)
 
-    # Binding successfully doubles as the "ready" signal - clients detect
-    # readiness by successfully connecting, no separate ready flag needed.
-    listener = Listener(("localhost", 6000))
-    logger.info("Listener ready on localhost:6000")
+        deadline = time.monotonic() + BATCH_WINDOW_S
+        while len(batch_sentences) < MAX_BATCH_SIZE:
+            timeout = deadline - time.monotonic()
+            if timeout <= 0:
+                break
+            try:
+                s, rq = batch_queue.get(timeout=timeout)
+            except queue.Empty:
+                break
+            batch_items.append((s, rq))
+            batch_sentences.extend(s)
 
+        try:
+            vecs = model.encode(batch_sentences).astype(np.float32)
+        except Exception as e:
+            logger.exception("Batch encode failed (%d sentences, %d jobs)",
+                              len(batch_sentences), len(batch_items))
+            for _, rq in batch_items:
+                rq.put(("error", str(e)))
+            continue
+
+        offset = 0
+        for sentences, rq in batch_items:
+            n = len(sentences)
+            rq.put(("ok", vecs[offset:offset + n]))
+            offset += n
+
+
+def handle_client(conn):
+    """One thread per connection. Pure I/O + queue handoff, no GPU work here."""
+    job_id = None
+    try:
+        job_id, sentences, chunk_size = conn.recv()
+        logger.info("Job %s: %d sentences, chunk_size=%d", job_id, len(sentences), chunk_size)
+
+        total = len(sentences)
+        all_vecs = []
+        conn.send(("progress", 0, total))
+
+        for i in range(0, total, chunk_size):
+            chunk = sentences[i:i + chunk_size]
+            result_q = queue.Queue()
+            batch_queue.put((chunk, result_q))
+            status, payload = result_q.get()  # waits for the batching worker
+
+            if status == "error":
+                raise RuntimeError(payload)
+
+            all_vecs.append(payload)
+            done = min(i + chunk_size, total)
+            conn.send(("progress", done, total))
+
+        result = np.concatenate(all_vecs, axis=0)
+        conn.send(("done", result))
+        logger.info("Job %s: completed, sent %d embeddings", job_id, len(result))
+
+    except Exception as e:
+        logger.exception("Job %s: error", job_id)
+        try:
+            conn.send(("error", str(e)))
+        except Exception:
+            logger.warning("Job %s: could not send error, connection closed", job_id)
+    finally:
+        conn.close()
+
+
+def accept_loop(listener):
     while True:
         try:
             conn = listener.accept()
@@ -41,37 +108,23 @@ def main():
         except (EOFError, OSError) as e:
             logger.warning("Bad handshake attempt ignored: %s", e)
             continue
+        threading.Thread(target=handle_client, args=(conn,), daemon=True).start()
 
-        job_id = None
-        try:
-            job_id, sentences, chunk_size = conn.recv()
-            logger.info("Job %s: received %d sentences, chunk_size=%d",
-                        job_id, len(sentences), chunk_size)
 
-            all_vecs = []
-            total = len(sentences)
-            conn.send(("progress", 0, total))
+def main():
+    global model
+    logger.info("Daemon starting")
 
-            for i in range(0, total, chunk_size):
-                chunk = sentences[i:i + chunk_size]
-                vecs = model.encode(chunk).astype(np.float32)
-                all_vecs.append(vecs)
-                done = min(i + chunk_size, total)
-                conn.send(("progress", done, total))
-                logger.info("Job %s: encoded %d/%d", job_id, done, total)
+    logger.info("Loading model...")
+    model = SentenceTransformer(MODEL_NAME)
+    logger.info("Model loaded successfully")
 
-            result = np.concatenate(all_vecs, axis=0)
-            conn.send(("done", result))
-            logger.info("Job %s: completed, sent %d embeddings", job_id, len(result))
+    threading.Thread(target=batching_worker, daemon=True).start()
 
-        except Exception as e:
-            logger.exception("Job %s: error", job_id)
-            try:
-                conn.send(("error", str(e)))
-            except Exception:
-                logger.warning("Job %s: could not send error, connection closed", job_id)
-        finally:
-            conn.close()
+    listener = Listener((HOST, PORT), backlog=BACKLOG)
+    logger.info("Listener ready on %s:%d (backlog=%d)", HOST, PORT, BACKLOG)
+
+    accept_loop(listener)
 
 
 if __name__ == "__main__":

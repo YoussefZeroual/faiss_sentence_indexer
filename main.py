@@ -96,13 +96,13 @@ def main():
                                    index_type="flat", output_file_path=output_index)
             else:
                 raise
-    else:
-        index = load_index(output_index)
 
-    if index.ntotal != len(metadata["raw_text"]):
-        sys.exit(f"Error: index/metadata mismatch (index has {index.ntotal} vectors, "
-                 f"metadata has {len(metadata['raw_text'])} entries). "
-                 f"Re-run with --force to rebuild.")
+    if not index_missing:
+        index = load_index(output_index)
+        if index.ntotal != len(metadata["raw_text"]):
+            sys.exit(f"Error: index/metadata mismatch (index has {index.ntotal} vectors, "
+                    f"metadata has {len(metadata['raw_text'])} entries). "
+                    f"Re-run with --force to rebuild.")
     import time
     t0 = time.perf_counter()
     result = search(query_str=args.query, index=index, metric_type=faiss.METRIC_INNER_PRODUCT, top_k=args.top_k, metadata=metadata)

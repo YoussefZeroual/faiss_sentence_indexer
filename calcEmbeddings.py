@@ -201,8 +201,6 @@ def parse_sentences(file_path= None,mode = "conllu"):
         t1 = time.perf_counter()
         ex_time = t1-t0
         logger.info("Parsed %s sentences, %s tokens in %s seconds",len_s,n_tokens,np.round(ex_time,2))
-        for i,s in zip(metadata["sent_id"],metadata["raw_text"]):
-            print(i,s)
         return sent_list,metadata
     elif mode == "xml":
         t0 = time.perf_counter()
@@ -214,8 +212,6 @@ def parse_sentences(file_path= None,mode = "conllu"):
         t1 = time.perf_counter()
         ex_time = t1-t0
         logger.info("Parsed %s sentences, %s tokens in %s seconds",len_s,n_tokens,np.round(ex_time,2))
-        for i,s in zip(metadata["sent_id"],metadata["raw_text"]):
-            print(i,s)
         return sent_list,metadata
     elif mode == "trs":
         t0 = time.perf_counter()

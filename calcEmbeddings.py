@@ -93,7 +93,7 @@ def parse_conllu_fast(file_path,text=None):
         sent_list.append(text_raw)
 
     #check if the raw text is empty to fallback to 2nd parsing method
-    if (sent_list == []) or (sum(x is None for x in sent_list) >= 5):
+    if (sent_list == []) or (sum(x is None for x in sent_list) >= 3):
         logger.warning("sent_list has None entries, falling back to form concatenation method")
         raw_entries = parse_conllu_raw_entries(content)
         metadata = {"sent_id": [], "raw_text": []}

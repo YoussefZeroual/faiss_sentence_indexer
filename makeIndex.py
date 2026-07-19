@@ -28,7 +28,7 @@ def makeIndex(embeddings=None,embedding_file_path=None,metric_type=None,index_ty
             return index
     if embeddings is None:
        embeddings = load_embeddings(embedding_file_path)
-    logger.info("making index for %s sentences",embeddings.shape[0])
+    logger.info("making index for %s sentences, index type=%s",embeddings.shape[0],index_type)
     n,dim = embeddings.shape
     metric_type = metric_type
     t0 = time.perf_counter()

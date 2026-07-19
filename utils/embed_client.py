@@ -37,7 +37,7 @@ def _start_daemon():
     raise RuntimeError("Embedding daemon failed to start")
 
 
-def encode(sentences, chunk_size=32, show_progress=True):
+def encode(sentences, chunk_size=512, show_progress=True):
     conn = _try_connect()
     if conn is None:
         conn = _start_daemon()

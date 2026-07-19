@@ -18,7 +18,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Semantic search over a corpus using FAISS.")
     parser.add_argument("input_file", help="Path to the corpus file (.conllu or .xml)")
     parser.add_argument("query", help="Query string to search for")
-    parser.add_argument("--index-type", choices=["flat", "hnsw", "ivfpq"], default="flat",
+    parser.add_argument("--index-type", choices=["flat", "hnsw", "ivfpq"], default="ivfpq",
                          help="FAISS index type (default: flat)")
     parser.add_argument("--top-k", type=int, default=10, help="Number of results to return (default: 10)")
     parser.add_argument("--reduce-precision", action="store_true",
@@ -43,7 +43,8 @@ def main():
     output_embeddings = base + ".npy"
     # Index must be rebuilt whenever embeddings were recomputed, not just when it's missing on disk.
     embeddings_missing = args.force or not os.path.exists(output_embeddings) or not os.path.exists(output_metadata)
-    index_missing = args.force or (embeddings_missing) and (not os.path.exists(output_index))
+    index_missing = args.force or (embeddings_missing) or (not os.path.exists(output_index))
+    print(index_missing)
     if not args.log:
         logging.disable(logging.WARNING)
     if not os.path.exists(input_file):
@@ -68,6 +69,7 @@ def main():
         return True
 
     mode = MODE_BY_EXT.get(ext.lower())
+
     if embeddings_missing and not index_missing and not args.force:
         index = load_index(output_index)
         metadata = load_metadata(output_metadata)
@@ -78,6 +80,10 @@ def main():
         embeddings, metadata = calcEMbeddings(input_file, output_embeddings, mode,
                                                reduce_precision=args.reduce_precision,overwrite=args.force)
         save_metadata(metadata, output_metadata)
+        makeIndex(embeddings=embeddings, embedding_file_path=None,
+                               metric_type=faiss.METRIC_INNER_PRODUCT,
+                               index_type=args.index_type, output_file_path=output_index)
+
     else:
         embeddings = np.load(output_embeddings)
         metadata = load_metadata(output_metadata)

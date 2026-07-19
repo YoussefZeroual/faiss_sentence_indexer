@@ -6,7 +6,7 @@ import sys
 import faiss
 import numpy as np
 
-from calcEmbeddings import calcEMbeddings, save_metadata, parse_sentences,encode_folder
+from calcEmbeddings import calcEmbeddings, save_metadata, parse_sentences,encode_folder
 from makeIndex import makeIndex,makeIndex_folder
 from utils.embed_client import encode
 from searchEmbedding import search, load_metadata, load_index, search_folder,embedd_query
@@ -77,7 +77,7 @@ def main():
         sys.exit(f"Error: unsupported file extension '{ext}' (expected one of {list(MODE_BY_EXT)})")
 
     elif embeddings_missing and index_missing:
-        embeddings, metadata = calcEMbeddings(input_file, output_embeddings, mode,
+        embeddings, metadata = calcEmbeddings(input_file, output_embeddings, mode,
                                                reduce_precision=args.reduce_precision,overwrite=args.force)
         save_metadata(metadata, output_metadata)
         makeIndex(embeddings=embeddings, embedding_file_path=None,

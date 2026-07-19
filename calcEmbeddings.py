@@ -228,7 +228,7 @@ def parse_sentences(file_path= None,mode = "conllu"):
         return sent_list,metadata
 
 
-def calcEMbeddings(collection_file_path=None, output_file_path=None, mode="conllu",reduce_precision=False,overwrite=False):
+def calcEmbeddings(collection_file_path=None, output_file_path=None, mode="conllu",reduce_precision=False,overwrite=False):
 
     base, ext = os.path.splitext(collection_file_path)
     if (not overwrite) and  (os.path.exists(base+".npy")) and os.path.exists(base+".json"):
@@ -273,7 +273,7 @@ def encode_folder(input_folder=None,overwrite=False):
         logger.info("%s",f)
     for f,ext in zip(file_list,found_extentions):
         logger.info("Encoding file %s/%s filename=%s",cnt,len_f,f)
-        embeddings,metadata = calcEMbeddings(f,f.replace(ext,'npy'),ext,overwrite=overwrite)
+        embeddings,metadata = calcEmbeddings(f,f.replace(ext,'npy'),ext,overwrite=overwrite)
         save_metadata(metadata,f.replace(ext,"json"))
         cnt +=1
 if __name__ == "__main__":

@@ -24,30 +24,32 @@ logging.getLogger("sentence_transformers").setLevel(logging.WARNING)
 logging.getLogger("httpx").setLevel(logging.WARNING)
 import conllu
 from lxml import etree
-
+AMALGAM_REGEX = r'^\d+\-\d+'
 #---- helper functions -
 def parse_conllu_raw_entries(file_content):
     return [s.strip() for s in file_content.split('\n\n') if s.strip()]
 
 def is_amalgame(line):
-    return "".join(re.findall(r'^\d\-\d',line)) if re.findall(r'^\d\-\d',line) else None
+    return "".join(re.findall(AMALGAM_REGEX,line)) if re.findall(AMALGAM_REGEX,line) else None
 def has_amalgams(text):
-    lines_ = [l if re.findall(r'^\d\-\d',l) else None for l in text.split("\n") ]
+    lines_ = [l if re.findall(AMALGAM_REGEX,l) else None for l in text.split("\n") ]
     if set(lines_) == {None}:
         return False
     else:
         return True
 def concat_forms(text):
     tokens = []
-
     if has_amalgams(text):
         lines = text.split('\n')
         for i,t in enumerate(lines):
             if (not is_amalgame(lines[i-2])) and (not is_amalgame(lines[i-1])):
                 tokens.append(t)
-                raw_text = "\n".join(tokens)
-        raw_text = re.findall(r'^\d\-d|\d+\s+(\S+)', raw_text, re.MULTILINE)
+        joined_tokens = "\n".join(tokens)
+        # capture only amalgame lines or non amagame lines (skips amalgam child lines)
+        raw_text = re.findall(r'(?:^\d+\-\d+\s+|^\d+\s+)(\S+)', joined_tokens, re.MULTILINE)
         raw_text = " ".join(raw_text)
+        raw_text = fix_punctuation_spaces(raw_text)
+
     else:
         raw_text = re.findall(r'^\d+\s+(\S+)', text, re.MULTILINE)
         raw_text = " ".join(raw_text)
@@ -55,7 +57,7 @@ def concat_forms(text):
     return raw_text
 
 def get_sent_id(text):
-    match = re.search(r'^#sent_id\s*=\s*(\S+)', text, re.MULTILINE)
+    match = re.search(r'^#\s*sent_id\s*=\s*(\S+)', text, re.MULTILINE)
     return match.group(1) if match else None
 #--------parsing functions------
 def parse_conllu_fast(file_path,text=None):
@@ -119,8 +121,8 @@ def fix_punctuation_spaces(text):
     text = re.sub(r"'\s+", "'", text)  # space after apostrophe
 
     # 2. Fix spaces before French punctuation (:, ;, ?, !, »)
-    text = re.sub(r'\s+([:;?!])', r'\1', text)  # Remove space before
-    text = re.sub(r'([:;?!])(\S)', r'\1 \2', text)  # Add space after if needed
+    text = re.sub(r'\s+([.:;?!])', r'\1', text)  # Remove space before
+    text = re.sub(r'([.:;?!])(\S)', r'\1 \2', text)  # Add space after if needed
 
     # 3. Fix French guillemets (« »)
     text = re.sub(r'\s+([»])', r'\1', text)  # Remove space before closing
@@ -149,12 +151,10 @@ def parse_sentences_xml_conllu(filepath):
     sent_list = []
     for s in sentences:
         sent_id = s.get("id")
-        if s.text is not None and "\n" in s.text and "\t" in s.text:
-            logger.warning("detected multiline text inside <s>, using contained CONLLU mode, sentence_id=%s,sentence=%s",sent_id,s.text)
+        if s.text is not None and "\n" in s.text:# and "\t" in s.text:
+            logger.warning("detected multiline text inside <s>, using contained CONLLU mode, sentence_id=%s,",sent_id)
             raw_text = concat_forms(s.text)
             raw_text = fix_punctuation_spaces(raw_text)
-            logger.warning("Parsed sentence: %s",s.text)
-
         elif s.text is None:
             logger.warning("Sentid=%s:<s> text is empty, looking for children texts",sent_id)
             raw_text = "".join(s.itertext())
@@ -189,7 +189,6 @@ def parse_sentence_trs(file_path=None):
         metadata["sent_id"].append(sent_id)
         metadata["raw_text"].append(raw_text)
         sent_list.append(raw_text)
-
     return sent_list,metadata
 def parse_sentences(file_path= None,mode = "conllu"):
     if mode == "conllu":
@@ -202,6 +201,8 @@ def parse_sentences(file_path= None,mode = "conllu"):
         t1 = time.perf_counter()
         ex_time = t1-t0
         logger.info("Parsed %s sentences, %s tokens in %s seconds",len_s,n_tokens,np.round(ex_time,2))
+        for i,s in zip(metadata["sent_id"],metadata["raw_text"]):
+            print(i,s)
         return sent_list,metadata
     elif mode == "xml":
         t0 = time.perf_counter()
@@ -213,6 +214,8 @@ def parse_sentences(file_path= None,mode = "conllu"):
         t1 = time.perf_counter()
         ex_time = t1-t0
         logger.info("Parsed %s sentences, %s tokens in %s seconds",len_s,n_tokens,np.round(ex_time,2))
+        for i,s in zip(metadata["sent_id"],metadata["raw_text"]):
+            print(i,s)
         return sent_list,metadata
     elif mode == "trs":
         t0 = time.perf_counter()

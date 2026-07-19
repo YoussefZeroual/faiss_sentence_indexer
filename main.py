@@ -44,7 +44,6 @@ def main():
     # Index must be rebuilt whenever embeddings were recomputed, not just when it's missing on disk.
     embeddings_missing = args.force or not os.path.exists(output_embeddings) or not os.path.exists(output_metadata)
     index_missing = args.force or (embeddings_missing) or (not os.path.exists(output_index))
-    print(index_missing)
     if not args.log:
         logging.disable(logging.WARNING)
     if not os.path.exists(input_file):

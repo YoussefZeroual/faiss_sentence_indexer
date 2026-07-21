@@ -32,7 +32,7 @@ def parse_args():
                          help="Force recomputation of embeddings/metadata/index even if cached files exist")
     parser.add_argument("--folder", action="store_true",
                          help="process a folder")
-    parser.add_argument("--log",action="store_true",help="disables logging info")
+    parser.add_argument("--log",action="store_true",help="enables logging info")
     parser.add_argument("--encode_only",action="store_true",help="encodes files and creates indexes without running queries (only in folder mode)")
     parser.add_argument("--search_only",action="store_true",help="searches presuming index files already exist to skip checking and improve speed (only in folder mode)")
     parser.add_argument("--regenerate_metadata",action="store_true",help="regenerate metadata of a folder or a file")
@@ -86,10 +86,11 @@ def main():
     if args.regenerate_metadata:
         files = glob.glob(base+"/"+"*conllu")
         files.extend (glob.glob(base+"/"+"*xml"))
-        logger.info("regenerating metadata for %s files",len(files))
+
         metadata = None
         len_f = len(files)
         if args.folder:
+            logger.info("regenerating metadata for %s files",len(files))
             for i,f in enumerate(files):
                 logger.info("regenerating metadata for file %s/%s filename=%s",i,len_f,f)
                 _,metadata = parse_sentences(f)
@@ -97,6 +98,7 @@ def main():
                 save_metadata(metadata,base+".json")
             process_folder(args,base)
         elif not args.folder:
+            logger.info("regenerating metadata for %s",input_file)
             _,metadata = parse_sentences(input_file)
             index = load_index(base+".faiss")
             save_metadata(metadata,base+".json")
@@ -104,7 +106,6 @@ def main():
 
         return True
     if ext == ".faiss" :
-        print(ext)
         metadata = load_metadata(output_metadata)
         index = load_index(output_index)
         process(args,index=index,metadata=metadata)

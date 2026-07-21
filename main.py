@@ -12,7 +12,12 @@ from utils.embed_client import encode
 from searchEmbedding import search, load_metadata, load_index, search_folder,embedd_query
 import logging
 MODE_BY_EXT = {".conllu": "conllu", ".xml": "xml",".trs":"trs",".faiss":"faiss"}
-
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    #filename='/home/miai_guest/zeroualy/module_faiss/app.log'
+)
+logger = logging.getLogger(__name__)
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Semantic search over a corpus using FAISS.")
@@ -30,9 +35,27 @@ def parse_args():
     parser.add_argument("--log",action="store_true",help="disables logging info")
     parser.add_argument("--encode_only",action="store_true",help="encodes files and creates indexes without running queries (only in folder mode)")
     parser.add_argument("--search_only",action="store_true",help="searches presuming index files already exist to skip checking and improve speed (only in folder mode)")
+    parser.add_argument("--regenerate_metadata",action="store_true",help="regenerate metadata of a folder or a file")
     return parser.parse_args()
-
-
+def process(args,index, metric_type=faiss.METRIC_INNER_PRODUCT, metadata=None):
+    query_str=args.query
+    top_k=args.top_k
+    import time
+    t0 = time.perf_counter()
+    result = search(query_str=args.query, index=index, metric_type=faiss.METRIC_INNER_PRODUCT, top_k=args.top_k, metadata=metadata)
+    t1 = time.perf_counter()
+    exec_time = t1 - t0
+    for r in result:
+        print(f"{r[0]} | {r[1]} |  {r[2]}")
+    print("temps d'exécution de la requête Faiss:",np.round(exec_time,2))
+def process_folder(args,input_file):
+        query_vector = embedd_query(args.query)
+        print("Processing folder")
+        if args.force:
+            encode_folder(input_file,overwrite=True)
+            makeIndex_folder(input_folder=input_file,metric_type=faiss.METRIC_INNER_PRODUCT,index_type="ivfpq",overwrite=True)
+        print("------------")
+        search_folder(input_file,query_vector=query_vector,metric_type=faiss.METRIC_INNER_PRODUCT,top_k=args.top_k)
 def main():
     args = parse_args()
     input_file = args.input_file
@@ -44,10 +67,33 @@ def main():
     # Index must be rebuilt whenever embeddings were recomputed, not just when it's missing on disk.
     embeddings_missing = args.force or not os.path.exists(output_embeddings) or not os.path.exists(output_metadata)
     index_missing = args.force or (embeddings_missing) or (not os.path.exists(output_index))
+    metadata_messing = not os.path.exists(output_metadata)
     if not args.log:
         logging.disable(logging.WARNING)
     if not os.path.exists(input_file):
         sys.exit(f"Error: input file not found: {input_file}")
+
+    if args.regenerate_metadata:
+        import glob
+        files = glob.glob(base+"/"+"*conllu")
+        files.extend (glob.glob(base+"/"+"*xml"))
+        logger.info("regenerating metadata for %s files",len(files))
+        metadata = None
+        len_f = len(files)
+        if args.folder:
+            for i,f in enumerate(files):
+                logger.info("regenerating metadata for file %s/%s filename=%s",i,len_f,f)
+                _,metadata = parse_sentences(f)
+                base, ext = os.path.splitext(f)
+                save_metadata(metadata,base+".json")
+            process_folder(args,base)
+        return True
+    if ext == ".faiss" :
+        print(ext)
+        metadata = load_metadata(output_metadata)
+        index = load_index(output_index)
+        process(args,index=index,metadata=metadata)
+        return True
     if args.encode_only and folder:
         encode_folder(input_file,overwrite=args.force)
         makeIndex_folder(input_folder=input_file,metric_type=faiss.METRIC_INNER_PRODUCT,index_type="ivfpq",overwrite=args.force)
@@ -58,17 +104,10 @@ def main():
         search_folder(input_file,query_vector=query_vector,metric_type=faiss.METRIC_INNER_PRODUCT,top_k=args.top_k)
         return True
     if folder:
-        query_vector = embedd_query(args.query)
-        print("Processing folder")
-        if args.force:
-            encode_folder(input_file,overwrite=True)
-            makeIndex_folder(input_folder=input_file,metric_type=faiss.METRIC_INNER_PRODUCT,index_type="ivfpq",overwrite=True)
-        print("------------")
-        search_folder(input_file,query_vector=query_vector,metric_type=faiss.METRIC_INNER_PRODUCT,top_k=args.top_k)
+        process_folder(args,base)
         return True
 
     mode = MODE_BY_EXT.get(ext.lower())
-
     if embeddings_missing and not index_missing and not args.force:
         index = load_index(output_index)
         metadata = load_metadata(output_metadata)
@@ -108,14 +147,7 @@ def main():
             sys.exit(f"Error: index/metadata mismatch (index has {index.ntotal} vectors, "
                     f"metadata has {len(metadata['raw_text'])} entries). "
                     f"Re-run with --force to rebuild.")
-    import time
-    t0 = time.perf_counter()
-    result = search(query_str=args.query, index=index, metric_type=faiss.METRIC_INNER_PRODUCT, top_k=args.top_k, metadata=metadata)
-    t1 = time.perf_counter()
-    exec_time = t1 - t0
-    for r in result:
-        print(f"{r[0]} | {r[1]} |  {r[2]}")
-    print("temps d'exécution de la requête Faiss:",np.round(exec_time,2))
+    process(args,index=index,metadata=metadata)
 
 
 if __name__ == "__main__":

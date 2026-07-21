@@ -83,7 +83,11 @@ def search_folder(input_folder=None,query_str=None,query_vector=None,metric_type
         base, ext = os.path.splitext(f)
         logger.info("%s",f)
         index = load_index(f)
-        metadata = load_metadata(base+".json")
+        try:
+            metadata = load_metadata(base+".json")
+        except FileNotFoundError as e:
+            logger.warning("%s metadata file not found in directory,skipping file",base+".json")
+            continue
         result = search(query_str=query_str,query_vector=query_vector, index=index, metric_type=metric_type, top_k=top_k, metadata=metadata)
         result = [(f,r[0],r[1],float(r[2]))
                for r  in result]

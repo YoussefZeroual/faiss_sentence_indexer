@@ -59,7 +59,7 @@ def makeIndex(embeddings=None,embedding_file_path=None,metric_type=None,index_ty
     faiss.write_index(index,output_file_path)
     t1 = time.perf_counter()
     exec_time = t1-t0
-    logger.info("Index created successfully in %s seconds",np.round(exec_time,2))
+    logger.info("Index created successfully in %s seconds",np.round(exec_time,3))
     logger.info("index written successfully")
 
 

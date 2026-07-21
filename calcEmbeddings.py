@@ -59,6 +59,8 @@ def concat_forms(text):
 def get_sent_id(text):
     match = re.search(r'^#\s*sent_id\s*=\s*(\S+)', text, re.MULTILINE)
     return match.group(1) if match else None
+def clean_sentences(sent_list):
+    return [sent.replace("_","") for sent in sent_list]
 #--------parsing functions------
 def parse_conllu_fast(file_path,text=None):
     metadata = {"sent_id": [], "raw_text": []}
@@ -110,6 +112,7 @@ def parse_conllu_fast(file_path,text=None):
             metadata["sent_id"].append(sent_id)
             metadata["raw_text"].append(text_raw)
             sent_list.append(text_raw)
+    sent_list = clean_sentences(sent_list)
     return sent_list, metadata
 
 
@@ -167,6 +170,7 @@ def parse_sentences_xml_conllu(filepath):
         metadata["sent_id"].append(sent_id)
         metadata["raw_text"].append(raw_text)
         sent_list.append(raw_text)
+    sent_list = clean_sentences(sent_list)
     return sent_list,metadata
 def parse_sentence_trs(file_path=None):
     logger.info("mode is trs")
@@ -189,6 +193,7 @@ def parse_sentence_trs(file_path=None):
         metadata["sent_id"].append(sent_id)
         metadata["raw_text"].append(raw_text)
         sent_list.append(raw_text)
+    sent_list = clean_sentences(sent_list)
     return sent_list,metadata
 def parse_sentences(file_path= None,mode = "conllu"):
     if mode == "conllu":

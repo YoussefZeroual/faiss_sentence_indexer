@@ -232,7 +232,8 @@ def parse_sentences(file_path= None,mode = None):
         logger.info("Parsed %s sentences, %s tokens in %s seconds",len_s,n_tokens,np.round(ex_time,2))
     else:
         logger.warning("File format not recognized: %s",ext)
-        return sent_list,metadata
+        return None,None
+    return sent_list,metadata
 
 
 def calcEmbeddings(collection_file_path=None, output_file_path=None, mode="conllu",reduce_precision=False,overwrite=False):

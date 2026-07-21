@@ -99,7 +99,8 @@ def main():
         elif not args.folder:
             _,metadata = parse_sentences(input_file)
             index = load_index(base+".faiss")
-            process(args,index,metadata)
+            save_metadata(metadata,base+".json")
+            process(args,index=index,metadata=metadata)
 
         return True
     if ext == ".faiss" :

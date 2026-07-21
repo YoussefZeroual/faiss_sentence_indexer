@@ -2,7 +2,7 @@
 import argparse
 import os
 import sys
-
+import glob
 import faiss
 import numpy as np
 
@@ -36,6 +36,7 @@ def parse_args():
     parser.add_argument("--encode_only",action="store_true",help="encodes files and creates indexes without running queries (only in folder mode)")
     parser.add_argument("--search_only",action="store_true",help="searches presuming index files already exist to skip checking and improve speed (only in folder mode)")
     parser.add_argument("--regenerate_metadata",action="store_true",help="regenerate metadata of a folder or a file")
+    parser.add_argument("--warn",action="store_true",help="enables log for warnings only")
     return parser.parse_args()
 def process(args,index, metric_type=faiss.METRIC_INNER_PRODUCT, metadata=None):
     query_str=args.query
@@ -45,12 +46,15 @@ def process(args,index, metric_type=faiss.METRIC_INNER_PRODUCT, metadata=None):
     result = search(query_str=args.query, index=index, metric_type=faiss.METRIC_INNER_PRODUCT, top_k=args.top_k, metadata=metadata)
     t1 = time.perf_counter()
     exec_time = t1 - t0
+    print("Sent id               | Sentence    | similarity score")
     for r in result:
         print(f"{r[0]} | {r[1]} |  {r[2]}")
     print("temps d'exécution de la requête Faiss:",np.round(exec_time,2))
 def process_folder(args,input_file):
         query_vector = embedd_query(args.query)
-        print("Processing folder")
+        base, ext = os.path.splitext(input_file)
+        files = glob.glob(base+"/"+"*faiss")
+        print("Processing folder: searching similarity in",len(files),"index files")
         if args.force:
             encode_folder(input_file,overwrite=True)
             makeIndex_folder(input_folder=input_file,metric_type=faiss.METRIC_INNER_PRODUCT,index_type="ivfpq",overwrite=True)
@@ -68,13 +72,18 @@ def main():
     embeddings_missing = args.force or not os.path.exists(output_embeddings) or not os.path.exists(output_metadata)
     index_missing = args.force or (embeddings_missing) or (not os.path.exists(output_index))
     metadata_messing = not os.path.exists(output_metadata)
-    if not args.log:
-        logging.disable(logging.WARNING)
+    if args.log:
+        logging.getLogger("searchEmbedding").setLevel(logging.INFO)
+        logging.getLogger("calcEmbeddings").setLevel(logging.INFO)
+        logging.getLogger("makeIndex").setLevel(logging.INFO)
+    elif args.warn:
+        logging.getLogger("searchEmbedding").setLevel(logging.WARNING)
+        logging.getLogger("calcEmbeddings").setLevel(logging.WARNING)
+        logging.getLogger("makeIndex").setLevel(logging.WARNING)
     if not os.path.exists(input_file):
         sys.exit(f"Error: input file not found: {input_file}")
 
     if args.regenerate_metadata:
-        import glob
         files = glob.glob(base+"/"+"*conllu")
         files.extend (glob.glob(base+"/"+"*xml"))
         logger.info("regenerating metadata for %s files",len(files))
@@ -87,6 +96,11 @@ def main():
                 base, ext = os.path.splitext(f)
                 save_metadata(metadata,base+".json")
             process_folder(args,base)
+        elif not args.folder:
+            _,metadata = parse_sentences(input_file)
+            index = load_index(base+".faiss")
+            process(args,index,metadata)
+
         return True
     if ext == ".faiss" :
         print(ext)
@@ -100,8 +114,7 @@ def main():
         return True
     if args.search_only and folder:
         query_vector = embedd_query(args.query)
-        print("Processing folder")
-        search_folder(input_file,query_vector=query_vector,metric_type=faiss.METRIC_INNER_PRODUCT,top_k=args.top_k)
+        process_folder(args,base)
         return True
     if folder:
         process_folder(args,base)

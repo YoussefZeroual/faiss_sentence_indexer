@@ -195,7 +195,9 @@ def parse_sentence_trs(file_path=None):
         sent_list.append(raw_text)
     sent_list = clean_sentences(sent_list)
     return sent_list,metadata
-def parse_sentences(file_path= None,mode = "conllu"):
+def parse_sentences(file_path= None,mode = None):
+    base,ext = os.path.splitext(file_path)
+    mode = ext.replace(".","")
     if mode == "conllu":
         t0 = time.perf_counter()
         logger.info("Parsing CONLLU sentences")
@@ -228,7 +230,8 @@ def parse_sentences(file_path= None,mode = "conllu"):
         t1 = time.perf_counter()
         ex_time = t1-t0
         logger.info("Parsed %s sentences, %s tokens in %s seconds",len_s,n_tokens,np.round(ex_time,2))
-
+    else:
+        logger.warning("File format not recognized: %s",ext)
         return sent_list,metadata
 
 

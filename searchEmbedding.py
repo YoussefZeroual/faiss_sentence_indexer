@@ -73,6 +73,7 @@ def search_folder(input_folder=None,query_str=None,query_vector=None,metric_type
     file_list = glob.glob(input_folder+"/*"+"faiss")
     len_f = len(file_list)
     results = []
+    skipped = False
     logger.info("Found %s files in folder",len_f)
     if query_vector is not None:
         query_vector =query_vector
@@ -87,6 +88,7 @@ def search_folder(input_folder=None,query_str=None,query_vector=None,metric_type
             metadata = load_metadata(base+".json")
         except FileNotFoundError as e:
             logger.warning("%s metadata file not found in directory,skipping file",base+".json")
+            skipped = True
             continue
         result = search(query_str=query_str,query_vector=query_vector, index=index, metric_type=metric_type, top_k=top_k, metadata=metadata)
         result = [(f,r[0],r[1],float(r[2]))
@@ -97,7 +99,10 @@ def search_folder(input_folder=None,query_str=None,query_vector=None,metric_type
     t1 = time.perf_counter()
     exec_time = t1-t0
     logger.info("Folder search executed in %s seconds in %s files",np.round(exec_time,2),len_f)
+    if skipped:
+        logger.warning("Some index files were skipped because corresponding metadata files were not found")
     if verbose:
+        print("index file                | Sent id               | Sentence    | similarity score")
         for r in results:
             print(f"{r[0]} | {r[1]} | {r[2]} | {r[3]}")
 

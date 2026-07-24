@@ -13,12 +13,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 def load_embeddings(embedding_file_path):
-    embeddings = np.load(embedding_file_path)
-
+    base,ext = os.path.splitext(embedding_file_path)
+    embeddings = np.load(base+".npy")
     embeddings = np.ascontiguousarray(embeddings,dtype=np.float32)
     faiss.normalize_L2(embeddings)
     return embeddings
-def makeIndex(embeddings=None,embedding_file_path=None,metric_type=None,index_type=None,output_file_path=None,overwrite=False):
+def makeIndex(embeddings=None,embedding_file_path=None,metric_type=None,index_type=None,output_file_path=None,overwrite=False,token_mode=False):
     import os
     if embedding_file_path is not None:
         base, ext = os.path.splitext(embedding_file_path)
@@ -29,6 +29,9 @@ def makeIndex(embeddings=None,embedding_file_path=None,metric_type=None,index_ty
             return index
     if embeddings is None:
        embeddings = load_embeddings(embedding_file_path)
+    else:
+        embeddings = np.ascontiguousarray(embeddings,dtype=np.float32)
+        faiss.normalize_L2(embeddings)
     logger.info("making index for %s sentences, index type=%s",embeddings.shape[0],index_type)
     n,dim = embeddings.shape
     metric_type = metric_type
@@ -56,28 +59,34 @@ def makeIndex(embeddings=None,embedding_file_path=None,metric_type=None,index_ty
     else:
         logger.warning("Index Type unrecognized or empty: %s",index_type)
         raise ValueError(f"Index type unkown or empty: {index_type}")
-
+    if token_mode:
+        output_file_path = output_file_path.replace(".faiss","_token.faiss")
     faiss.write_index(index,output_file_path)
     t1 = time.perf_counter()
     exec_time = t1-t0
     logger.info("Index created successfully in %s seconds",np.round(exec_time,3))
-    logger.info("index written successfully")
+    logger.info("index written successfully to %s",output_file_path)
 
 
     return index
-def makeIndex_folder(input_folder=None,metric_type=None,index_type=None,overwrite=False):
+def makeIndex_folder(input_folder=None,metric_type=None,index_type=None,overwrite=False,token_mode=False):
+    if token_mode:
+        emb_ext = "_token.npy"
+    else:
+        emb_ext = ".npy"
     if '*' in input_folder:
         file_list = glob.glob(input_folder)
-        file_list = [os.path.splitext(f)[0]+".npy"  for f in file_list]
+        file_list = [os.path.splitext(f)[0].replace("_token","")+emb_ext  for f in file_list]
     else:
-        file_list = glob.glob(input_folder+"/*"+"npy")
+        file_list = glob.glob(input_folder+"/*"+emb_ext)
     len_f = len(file_list)
     logger.info("Found %s files in folder",len_f)
     for f in file_list:
         logger.info("%s",f)
     for f in file_list:
+        base,ext = os.path.splitext(f)
         logger.info("Making index for file %s",f)
-        output_file_path = f.replace(".npy",".faiss")
+        output_file_path = base+".faiss"
         index = makeIndex(embedding_file_path=f,metric_type=metric_type,index_type=index_type,output_file_path=output_file_path,overwrite=overwrite)
 
 

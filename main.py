@@ -52,7 +52,7 @@ def process(args,index, metric_type=faiss.METRIC_INNER_PRODUCT, metadata=None):
         print(f"{r[0]} | {r[1]} |  {r[2]}")
     print("temps d'exécution de la requête Faiss:",np.round(exec_time,2))
 def process_folder(args,input_file):
-        query_vector = embedd_query(args.query)
+        query_vector = embedd_query(args.query,args.token_emb)
         base, ext = os.path.splitext(input_file)
         if '*' in input_file:
             files = glob.glob(input_file)
@@ -61,9 +61,9 @@ def process_folder(args,input_file):
         print("Processing folder: searching similarity in",len(files),"index files")
         if args.force:
             encode_folder(input_file,overwrite=True,token_mode=args.token_emb)
-            makeIndex_folder(input_folder=input_file,metric_type=faiss.METRIC_INNER_PRODUCT,index_type="ivfpq",overwrite=True)
+            makeIndex_folder(input_folder=input_file,metric_type=faiss.METRIC_INNER_PRODUCT,index_type="ivfpq",overwrite=True,token_mode= args.token_emb)
         print("------------")
-        search_folder(input_file,query_vector=query_vector,metric_type=faiss.METRIC_INNER_PRODUCT,top_k=args.top_k)
+        search_folder(input_file,query_vector=query_vector,metric_type=faiss.METRIC_INNER_PRODUCT,top_k=args.top_k,token_mode=args.token_emb)
 def main():
     args = parse_args()
     input_file = args.input_file
@@ -128,28 +128,30 @@ def main():
         query_vector = embedd_query(args.query)
         process_folder(args,base)
         return True
-    if folder or '*' in input_file:
-        if '*' in input_file:
-            process_folder(args,input_file)
-        else:
-            process_folder(args,base)
+    if folder:
+        process_folder(args,base)
         return True
-
+    if'*' in input_file:
+        process_folder(args,input_file)
+        return True
     mode = MODE_BY_EXT.get(ext.lower())
+
     if embeddings_missing and not index_missing and not args.force:
         index = load_index(output_index)
         metadata = load_metadata(output_metadata)
     elif (mode is None) and (not folder) and (embeddings_missing) and (index_missing):
         sys.exit(f"Error: unsupported file extension '{ext}' (expected one of {list(MODE_BY_EXT)})")
 
-    elif embeddings_missing and index_missing:
+    elif (embeddings_missing and index_missing) or args.force:
         embeddings, metadata = calcEmbeddings(input_file, output_embeddings, mode,
                                                reduce_precision=args.reduce_precision,overwrite=args.force,token_mode=args.token_emb)
         print(embeddings.shape)
         save_metadata(metadata, output_metadata)
-        makeIndex(embeddings=embeddings, embedding_file_path=None,
+        index=makeIndex(embeddings=embeddings, embedding_file_path=None,
                                metric_type=faiss.METRIC_INNER_PRODUCT,
                                index_type=args.index_type, output_file_path=output_index)
+        embeddings_missing = False
+        index_missing = False
 
     else:
         embeddings = np.load(output_embeddings)

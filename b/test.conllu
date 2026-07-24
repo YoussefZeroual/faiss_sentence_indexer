@@ -1,0 +1,135 @@
+1-2    vámonos   _
+1      vamos     ir
+2      nos       nosotros
+3-4    al        _
+3      a         a
+4      el        el
+5      mar       mar
+
+11-12    vámonos   _
+11      vamos     ir
+12      nos       nosotros
+12      amigos
+300-2 guapos
+13-14    al        _
+13      a         a
+14      el        el
+15      mar       mar
+
+#sent_id = s1
+#text_raw = LA VIOLENTE AMOUR
+#text_prefab = LA// VIOLENTE// AMOUR
+1	LA	le	DET	_	Gender=Fem|Number=Sing	1	_	_	PLK
+2	VIOLENTE	violent	ADJ	_	Gender=Fem|Number=Sing	2	_	_	_
+3	AMOUR	AMOUR	PROPN	_	_	3	_	_	_
+
+#sent_id = s2
+#text_raw = Robert Merle est né à Tebessa en Algérie .
+#text_prefab = Robert// Merle// est// né// à// Tebessa// en// Algérie// .
+1	Robert	Robert	PROPN	_	_	1	_	_	PLX
+2	Merle	Merle	PROPN	_	_	2	_	_	PLX
+3	est	être	AUX	_	Mood=Ind|Number=Sing|Person=3|Tense=Pres|VerbForm=Fin	3	_	_	_
+4	né	naître	VERB	_	Gender=Masc|Number=Sing|Tense=Past|VerbForm=Part	4	_	_	_
+5	à	à	ADP	_	_	5	_	_	_
+6	Tebessa	Tebessa	PROPN	_	_	6	_	_	_
+7	en	en	ADP	_	_	7	_	_	_
+8	Algérie	Algérie	PROPN	_	_	8	_	_	PLX
+9	.	.	PUNCT	_	_	9	_	_	_
+
+#sent_id = s3
+#text_raw = Il fait ses études secondaires et supérieures à Paris .
+#text_prefab = Il// fait// ses// études// secondaires// et// supérieures// à// Paris// .
+1	Il	il	PRON	_	Gender=Masc|Number=Sing|Person=3	1	_	_	PLK
+2	fait	faire	VERB	_	Mood=Ind|Number=Sing|Person=3|Tense=Pres|VerbForm=Fin	2	_	_	_
+3	ses	son	DET	_	Number=Plur|Number[psor]=Sing|Person[psor]=3|Poss=Yes|PronType=Prs	3	_	_	_
+4	études	étude	NOUN	_	Gender=Fem|Number=Plur	4	_	_	_
+5	secondaires	secondaire	ADJ	_	Gender=Fem|Number=Plur	5	_	_	_
+6	et	et	CCONJ	_	_	6	_	_	_
+7	supérieures	supérieur	ADJ	_	Gender=Fem|Number=Plur	7	_	_	_
+8	à	à	ADP	_	_	8	_	_	_
+9	Paris	Paris	PROPN	_	_	9	_	_	PLX
+10	.	.	PUNCT	_	_	10	_	_	_
+
+#sent_id = s4
+#text_raw = Licencié en philosophie , agrégé d' anglais , docteur ès lettres , il a été professeur de lycée , puis professeur titulaire dans les facultés de lettres de Rennes , Toulouse , Caen , Rouen , Alger et Paris - Nanterre où il enseigne encore aujourd'hui .
+#text_prefab = Licencié// en// philosophie// ,// agrégé// d'// anglais// ,// docteur// ès// lettres// ,// il// a// été// professeur// de// lycée// ,// puis// professeur// titulaire// dans// les// facultés// de// lettres// de// Rennes// ,// Toulouse// ,// Caen// ,// Rouen// ,// Alger// et// Paris// -// Nanterre// où// il// enseigne// encore// aujourd'hui// .
+1	Licencié	licencier	VERB	_	Gender=Masc|Number=Sing|Tense=Past|VerbForm=Part	1	_	_	_
+2	en	en	ADP	_	_	2	_	_	_
+3	philosophie	philosophie	NOUN	_	Gender=Fem|Number=Sing	3	_	_	_
+4	,	,	PUNCT	_	_	4	_	_	_
+5	agrégé	agrégé	NOUN	_	Gender=Masc|Number=Sing	5	_	_	_
+6	d'	de	ADP	_	_	6	_	_	_
+7	anglais	anglais	NOUN	_	Gender=Masc|Number=Sing	7	_	_	_
+8	,	,	PUNCT	_	_	8	_	_	_
+9	docteur	docteur	NOUN	_	Gender=Masc|Number=Sing	9	_	_	_
+10	ès	ès	ADP	_	_	10	_	_	_
+11	lettres	lettre	NOUN	_	Gender=Fem|Number=Plur	11	_	_	_
+12	,	,	PUNCT	_	_	12	_	_	_
+13	il	il	PRON	_	Gender=Masc|Number=Sing|Person=3	13	_	_	PLK
+14	a	avoir	AUX	_	Mood=Ind|Number=Sing|Person=3|Tense=Pres|VerbForm=Fin	14	_	_	_
+15	été	être	AUX	_	Gender=Masc|Number=Sing|Tense=Past|VerbForm=Part	15	_	_	_
+16	professeur	professeur	NOUN	_	Gender=Masc|Number=Sing	16	_	_	_
+17	de	de	ADP	_	_	17	_	_	_
+18	lycée	lycée	NOUN	_	Gender=Masc|Number=Sing	18	_	_	_
+19	,	,	PUNCT	_	_	19	_	_	_
+20	puis	puis	CCONJ	_	_	20	_	_	_
+21	professeur	professeur	NOUN	_	Gender=Masc|Number=Sing	21	_	_	_
+22	titulaire	titulaire	ADJ	_	Gender=Masc|Number=Sing	22	_	_	_
+23	dans	dans	ADP	_	_	23	_	_	_
+24	les	le	DET	_	Number=Plur	24	_	_	PLK
+25	facultés	faculté	NOUN	_	Gender=Fem|Number=Plur	25	_	_	_
+26	de	de	ADP	_	_	26	_	_	_
+27	lettres	lettre	NOUN	_	Gender=Fem|Number=Plur	27	_	_	_
+28	de	de	ADP	_	_	28	_	_	_
+29	Rennes	Rennes	PROPN	_	_	29	_	_	PLX
+30	,	,	PUNCT	_	_	30	_	_	_
+31	Toulouse	Toulouse	PROPN	_	_	31	_	_	PLX
+32	,	,	PUNCT	_	_	32	_	_	_
+33	Caen	Caen	PROPN	_	_	33	_	_	PLX
+34	,	,	PUNCT	_	_	34	_	_	_
+35	Rouen	Rouen	PROPN	_	_	35	_	_	PLX
+36	,	,	PUNCT	_	_	36	_	_	_
+37	Alger	Alger	PROPN	_	_	37	_	_	PLX
+38	et	et	CCONJ	_	_	38	_	_	_
+39	Paris	Paris	PROPN	_	_	39	_	_	PLX
+40	-	-	PUNCT	_	_	40	_	_	_
+41	Nanterre	Nanterre	PROPN	_	_	41	_	_	PLX
+42	où	où	PRON	_	_	42	_	_	_
+43	il	il	PRON	_	Gender=Masc|Number=Sing|Person=3	43	_	_	PLK
+44	enseigne	enseigner	VERB	_	Mood=Ind|Number=Sing|Person=3|Tense=Pres|VerbForm=Fin	44	_	_	_
+45	encore	encore	ADV	_	_	45	_	_	_
+46	aujourd'hui	aujourd'hui	ADV	_	_	46	_	_	_
+47	.	.	PUNCT	_	_	47	_	_	_
+
+#sent_id = s5
+#text_raw = Robert Merle est l' auteur de nombreuses traductions ( entre autres Les Voyages de Gulliver , ) , de pièces de théâtre et d' essais ( notamment sur Oscar Wilde ) .
+#text_prefab = Robert// Merle// est// l'// auteur// de// nombreuses// traductions// (// entre autres// Les// Voyages// de// Gulliver// ,// )// ,// de// pièces de théâtre// et// d'// essais// (// notamment// sur// Oscar// Wilde// )// .
+1	Robert	Robert	PROPN	_	_	1	_	_	PLX
+2	Merle	Merle	PROPN	_	_	2	_	_	PLX
+3	est	être	AUX	_	Mood=Ind|Number=Sing|Person=3|Tense=Pres|VerbForm=Fin	3	_	_	_
+4	l'	le	DET	_	Definite=Def|Number=Sing	4	_	_	PLK
+5	auteur	auteur	NOUN	_	Gender=Masc|Number=Sing	5	_	_	_
+6	de	de	ADP	_	_	6	_	_	_
+7	nombreuses	nombreux	ADJ	_	Gender=Fem|Number=Plur	7	_	_	_
+8	traductions	traduction	NOUN	_	Gender=Fem|Number=Plur	8	_	_	_
+9	(	(	PUNCT	_	_	9	_	_	_
+10	entre autres	entre autres	ADV	_	_	10	_	_	PLX
+11	Les	le	DET	_	Number=Plur	11	_	_	PLK
+12	Voyages	Voyages	PROPN	_	_	12	_	_	_
+13	de	de	ADP	_	_	13	_	_	_
+14	Gulliver	Gulliver	PROPN	_	_	14	_	_	_
+15	,	,	PUNCT	_	_	15	_	_	_
+16	)	)	PUNCT	_	_	16	_	_	_
+17	,	,	PUNCT	_	_	17	_	_	_
+18	de	de	ADP	_	_	18	_	_	_
+19	pièces de théâtre	pièces de théâtre	NOUN	_	_	19	_	_	PLX
+20	et	et	CCONJ	_	_	20	_	_	_
+21	d'	de	ADP	_	_	21	_	_	_
+22	essais	essai	NOUN	_	Gender=Masc|Number=Plur	22	_	_	_
+23	(	(	PUNCT	_	_	23	_	_	_
+24	notamment	notamment	ADV	_	_	24	_	_	_
+25	sur	sur	ADP	_	_	25	_	_	_
+26	Oscar	Oscar	PROPN	_	_	26	_	_	PLX
+27	Wilde	Wilde	PROPN	_	_	27	_	_	_
+28	)	)	PUNCT	_	_	28	_	_	_
+29	.	.	PUNCT	_	_	29	_	_	_

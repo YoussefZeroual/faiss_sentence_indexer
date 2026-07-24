@@ -215,8 +215,6 @@ def parse_sentence_trs(file_path=None):
         sent_id = s.get("startTime")
         raw_text = "".join(s.itertext())
         raw_text = fix_punctuation_spaces(raw_text).replace(' ',' ')
-        logger.info("Sentid %s, sent tex: %s",sent_id,raw_text)
-
         metadata["sent_id"].append(sent_id)
         text_raw = clean_sentence(raw_text,file_path,sent_id)
         metadata["raw_text"].append(raw_text)
@@ -266,12 +264,13 @@ def parse_sentences(file_path= None,mode = None):
 
 
 def calcEmbeddings(collection_file_path=None, output_file_path=None, mode="conllu",reduce_precision=False,overwrite=False,token_mode=False):
-
+    if token_mode:
+        token_suffix = "_token"
     base, ext = os.path.splitext(collection_file_path)
-    if (not overwrite) and  (os.path.exists(base+".npy")) and os.path.exists(base+".json"):
-        logger.warning("embedding file and metadata file already exist, loading from %s and %s",base+".npy",base+".json")
+    if (not overwrite) and  (os.path.exists(base+".npy")) and os.path.exists(base+token_suffix+".json"):
+        logger.warning("embedding file and metadata file already exist, loading from %s and %s",base+token_suffix+".npy",base+token_suffix+".json")
         embeddings = load_embeddings(base+".npy")
-        metadata= load_metadata(base+".json")
+        metadata= load_metadata(base+token_suffix+".json")
         return embeddings,metadata
 
     logger.info("parsing sentences, file=%s mode=%s",collection_file_path,mode)
@@ -282,6 +281,7 @@ def calcEmbeddings(collection_file_path=None, output_file_path=None, mode="conll
     if token_mode:
         logger.info("using token level embedding mode")
         embeddings = encode(sentence_list, chunk_size=100,token_mode=True)
+        output_file_path = output_file_path.replace(".npy",token_suffix+".npy")
     else:
         logger.info("using sentence level embedding mode")
         embeddings = encode(sentence_list, chunk_size=100)
@@ -296,8 +296,8 @@ def calcEmbeddings(collection_file_path=None, output_file_path=None, mode="conll
     logger.info("saved successfully")
 
     return embeddings,metadata
-def save_metadata(metadata,output_file=None):
-    logger.info("saving metadata")
+def save_metadata(metadata,output_file=None,token_mode=False):
+    logger.info("saving metadata tp %s",output_file)
     with open(output_file,"w",encoding="utf-8") as f:
         json.dump(metadata,f)
 
@@ -321,7 +321,7 @@ def encode_folder(input_folder=None,overwrite=False,token_mode=False):
     for f,ext in zip(file_list,found_extentions):
         logger.info("Encoding file %s/%s filename=%s",cnt,len_f,f)
         embeddings,metadata = calcEmbeddings(f,f.replace(ext,'npy'),ext,overwrite=overwrite,token_mode=token_mode)
-        save_metadata(metadata,f.replace(ext,"json"))
+        save_metadata(metadata,f.replace(ext,"json"),token_mode=token_mode)
         cnt +=1
 if __name__ == "__main__":
     input_folder ="test"

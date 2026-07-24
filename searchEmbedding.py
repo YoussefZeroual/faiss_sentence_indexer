@@ -33,6 +33,10 @@ def load_metadata(matadata_file_path=None):
         raise ValueError("Couldnt load metadata")
 
 def embedd_query(query_str=None,token_mode=False):
+    if token_mode:
+        logger.info("Encoding query with token level mode")
+    else:
+              logger.info("Encoding query with sentence level mode")
     import time
     t0 = time.perf_counter()
     if query_str is not None:
@@ -63,22 +67,39 @@ def search(query_vector=None,query_str=None, index=None, metric_type=None, top_k
     faiss.normalize_L2(query_vector)
     if hasattr(index, "nprobe"):
         index.nprobe = 8
-    distances, indices = index.search(query_vector, top_k)
-    matches = [(metadata["sent_id"][idx],metadata["raw_text"][idx], np.round(float(distance),3))
-               for idx, distance in zip(indices[0], distances[0])
-               if 0 <= idx < len_metadata]
+    try:
+        distances, indices = index.search(query_vector, top_k)
+        matches = [(metadata["sent_id"][idx],metadata["raw_text"][idx], np.round(float(distance),3))
+                for idx, distance in zip(indices[0], distances[0])
+                if 0 <= idx < len_metadata]
+    except AssertionError as e:
+        logger.warning("Assert error: query was probably encoded using a different model than target embeddings, please reembed target texts")
+        return []
     return matches
-def search_folder(input_folder=None,query_str=None,query_vector=None,metric_type=faiss.METRIC_INNER_PRODUCT,top_k=10,verbose=True):
+def search_folder(input_folder=None,query_str=None,query_vector=None,metric_type=faiss.METRIC_INNER_PRODUCT,top_k=10,verbose=True,token_mode=False):
     import time
     t0 = time.perf_counter()
     logger.info("Folder embedding search")
     import glob
     import os
+    token_suffix = ""
+
+    if token_mode:
+        index_ext = "_token.faiss"
+        token_suffix = "_token"
+    else:
+       index_ext = ".faiss"
     if '*' in input_folder:
         file_list = glob.glob(input_folder)
-        file_list = [os.path.splitext(f)[0]+".faiss"  for f in file_list]
+        file_list = [os.path.splitext(f)[0].replace("_token","")+index_ext  for f in file_list]
     else:
-        file_list = glob.glob(input_folder+"/*"+"faiss")
+        file_list = glob.glob(input_folder+"/*"+index_ext)
+
+    if token_mode:
+        file_list = list(set([f for f in file_list if os.path.splitext(f)[1] ==".faiss" and '_token' in f]))
+    else:
+        file_list = list(set([f for f in file_list if os.path.splitext(f)[1] ==".faiss"]))
+    print(file_list)
     len_f = len(file_list)
     results = []
     skipped = False
@@ -86,19 +107,24 @@ def search_folder(input_folder=None,query_str=None,query_vector=None,metric_type
     if query_vector is not None:
         query_vector =query_vector
     else:
-        query_vector = embedd_query(query_str)
+        query_vector = embedd_query(query_str,token_mode)
     faiss.normalize_L2(query_vector)
     for f in file_list:
         base, ext = os.path.splitext(f)
-        logger.info("%s",f)
-        index = load_index(f)
         try:
-            metadata = load_metadata(base+".json")
+            index = load_index(f)
+        except RuntimeError as e:
+            logger.warning("%s index file not found in directory,skipping file",base+".faiss")
+            skipped = True
+            continue
+        try:
+            metadata = load_metadata(base.replace("_token","")+".json")
         except FileNotFoundError as e:
             logger.warning("%s metadata file not found in directory,skipping file",base+".json")
             skipped = True
             continue
-        result = search(query_str=query_str,query_vector=query_vector, index=index, metric_type=metric_type, top_k=top_k, metadata=metadata)
+
+        result = search(query_str=query_str,query_vector=query_vector, index=index, metric_type=metric_type, top_k=top_k, metadata=metadata,token_mode=token_mode)
         result = [(f,r[0],r[1],float(r[2]))
                for r  in result]
         results.extend(result)
@@ -108,7 +134,9 @@ def search_folder(input_folder=None,query_str=None,query_vector=None,metric_type
     exec_time = t1-t0
     logger.info("Folder search executed in %s seconds in %s files",np.round(exec_time,2),len_f)
     if skipped:
-        logger.warning("Some index files were skipped because corresponding metadata files were not found")
+        logger.warning("Some index files were skipped because file or corresponding metadata files were not found")
+    if results ==[]:
+        logger.warning("Search query didn't return any results, input file list probaby empty")
     if verbose:
         print("index file                | Sent id               | Sentence    | similarity score")
         for r in results:

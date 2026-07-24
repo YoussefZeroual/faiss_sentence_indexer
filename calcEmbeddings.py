@@ -231,7 +231,11 @@ def parse_sentences(file_path= None,mode = None):
         logger.info("Parsing CONLLU sentences")
         sent_list,metadata = parse_conllu_fast(file_path)
         len_s = len(sent_list)
-        n_tokens = sum(len(re.findall(r'\w+|[^\w\s]', sent)) for sent in sent_list if sent !=MISSING_SENTENCE)
+        n_tokens = 0
+        try:
+            n_tokens = sum(len(re.findall(r'\w+|[^\w\s]', sent)) for sent in sent_list if sent !=MISSING_SENTENCE)
+        except TypeError as e:
+            logger.warning("Could'nt calculate number of tokens")
         t1 = time.perf_counter()
         ex_time = t1-t0
         logger.info("Parsed %s sentences, %s tokens in %s seconds",len_s,n_tokens,np.round(ex_time,2))
@@ -297,11 +301,16 @@ def save_metadata(metadata,output_file=None):
     with open(output_file,"w",encoding="utf-8") as f:
         json.dump(metadata,f)
 
-def encode_folder(input_folder=None,overwrite=False):
+def encode_folder(input_folder=None,overwrite=False,token_mode=False):
     extensions = [".conllu",".xml",".trs"]
-    file_list = []
-    for ext in extensions:
-        file_list.extend(glob.glob(input_folder+"/*"+ext))
+    if '*' in input_folder:
+        file_list = glob.glob(input_folder)
+        file_list = [f  for f in file_list if os.path.splitext(f)[1] in extensions]
+    else:
+
+        file_list = []
+        for ext in extensions:
+            file_list.extend(glob.glob(input_folder+"/*"+ext))
     len_f = len(file_list)
     logger.info("Found %s files in folder",len_f)
     found_extentions = [re.findall(r'\.([^.]+)$', f)[0] for f in file_list]
@@ -311,7 +320,7 @@ def encode_folder(input_folder=None,overwrite=False):
         logger.info("%s",f)
     for f,ext in zip(file_list,found_extentions):
         logger.info("Encoding file %s/%s filename=%s",cnt,len_f,f)
-        embeddings,metadata = calcEmbeddings(f,f.replace(ext,'npy'),ext,overwrite=overwrite)
+        embeddings,metadata = calcEmbeddings(f,f.replace(ext,'npy'),ext,overwrite=overwrite,token_mode=token_mode)
         save_metadata(metadata,f.replace(ext,"json"))
         cnt +=1
 if __name__ == "__main__":

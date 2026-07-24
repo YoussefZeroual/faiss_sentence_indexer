@@ -36,7 +36,7 @@ def embedd_query(query_str=None,token_mode=False):
     import time
     t0 = time.perf_counter()
     if query_str is not None:
-        logger.info("embedding query:%s",query_str)
+        logger.info("embedding query: %s",query_str)
         if token_mode:
             embeddings = encode([query_str],chunk_size=1,token_mode=True)
         else:
@@ -74,8 +74,11 @@ def search_folder(input_folder=None,query_str=None,query_vector=None,metric_type
     logger.info("Folder embedding search")
     import glob
     import os
-
-    file_list = glob.glob(input_folder+"/*"+"faiss")
+    if '*' in input_folder:
+        file_list = glob.glob(input_folder)
+        file_list = [os.path.splitext(f)[0]+".faiss"  for f in file_list]
+    else:
+        file_list = glob.glob(input_folder+"/*"+"faiss")
     len_f = len(file_list)
     results = []
     skipped = False

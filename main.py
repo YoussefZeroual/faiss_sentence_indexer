@@ -54,10 +54,13 @@ def process(args,index, metric_type=faiss.METRIC_INNER_PRODUCT, metadata=None):
 def process_folder(args,input_file):
         query_vector = embedd_query(args.query)
         base, ext = os.path.splitext(input_file)
-        files = glob.glob(base+"/"+"*faiss")
+        if '*' in input_file:
+            files = glob.glob(input_file)
+        else:
+            files = glob.glob(base+"/"+"*faiss")
         print("Processing folder: searching similarity in",len(files),"index files")
         if args.force:
-            encode_folder(input_file,overwrite=True)
+            encode_folder(input_file,overwrite=True,token_mode=args.token_emb)
             makeIndex_folder(input_folder=input_file,metric_type=faiss.METRIC_INNER_PRODUCT,index_type="ivfpq",overwrite=True)
         print("------------")
         search_folder(input_file,query_vector=query_vector,metric_type=faiss.METRIC_INNER_PRODUCT,top_k=args.top_k)
@@ -85,7 +88,9 @@ def main():
         logging.getLogger("searchEmbedding").setLevel(logging.WARNING)
         logging.getLogger("calcEmbeddings").setLevel(logging.WARNING)
         logging.getLogger("makeIndex").setLevel(logging.WARNING)
-    if not os.path.exists(input_file):
+    if '*' in input_file:
+        files = glob.glob(input_file)
+    elif not os.path.exists(input_file):
         sys.exit(f"Error: input file not found: {input_file}")
 
     if args.regenerate_metadata:
@@ -123,8 +128,11 @@ def main():
         query_vector = embedd_query(args.query)
         process_folder(args,base)
         return True
-    if folder:
-        process_folder(args,base)
+    if folder or '*' in input_file:
+        if '*' in input_file:
+            process_folder(args,input_file)
+        else:
+            process_folder(args,base)
         return True
 
     mode = MODE_BY_EXT.get(ext.lower())

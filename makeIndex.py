@@ -6,6 +6,7 @@ import json
 import logging
 import glob
 import time
+import os
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -65,7 +66,11 @@ def makeIndex(embeddings=None,embedding_file_path=None,metric_type=None,index_ty
 
     return index
 def makeIndex_folder(input_folder=None,metric_type=None,index_type=None,overwrite=False):
-    file_list = glob.glob(input_folder+"/*"+"npy")
+    if '*' in input_folder:
+        file_list = glob.glob(input_folder)
+        file_list = [os.path.splitext(f)[0]+".npy"  for f in file_list]
+    else:
+        file_list = glob.glob(input_folder+"/*"+"npy")
     len_f = len(file_list)
     logger.info("Found %s files in folder",len_f)
     for f in file_list:

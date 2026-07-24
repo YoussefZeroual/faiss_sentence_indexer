@@ -61,8 +61,8 @@ def concat_forms(text):
 def get_sent_id(text):
     match = re.search(r'^#\s*sent_id\s*=\s*(\S+)', text, re.MULTILINE)
     return match.group(1) if match else None
-def clean_sentences(sent_list):
-    return [sent.replace("_","") for sent in sent_list]
+def clean_sentence(sent):
+    return sent.replace("_","").replace("  "," ")
 #--------parsing functions------
 def get_tokens(text):
     if '\'' in text:
@@ -106,6 +106,7 @@ def parse_conllu_fast(file_path,text=None):
     # catch the last sentence if file doesn't end with a blank line
     if sent_id is not None:
         metadata["sent_id"].append(sent_id)
+        text_raw = clean_sentence(text_raw)
         metadata["raw_text"].append(text_raw)
         sent_list.append(text_raw)
 
@@ -122,11 +123,11 @@ def parse_conllu_fast(file_path,text=None):
             sent_id = get_sent_id(sent)
             if sent_id is None:
                 sent_id = i
+            text_raw = clean_sentence(text_raw)
             metadata["sent_id"].append(sent_id)
             metadata["raw_text"].append(text_raw)
             metadata["tokens"].append(tokens)
             sent_list.append(text_raw)
-    sent_list = clean_sentences(sent_list)
     return sent_list, metadata
 
 
@@ -186,9 +187,9 @@ def parse_sentences_xml_conllu(filepath):
             tokens = get_tokens(raw_text)
         metadata["sent_id"].append(sent_id)
         metadata["raw_text"].append(raw_text)
+        raw_text = clean_sentence(raw_text)
         metadata["tokens"].append(tokens)
         sent_list.append(raw_text)
-    sent_list = clean_sentences(sent_list)
     return sent_list,metadata
 def parse_sentence_trs(file_path=None):
     logger.info("mode is trs")
@@ -210,10 +211,10 @@ def parse_sentence_trs(file_path=None):
         logger.info("Sentid %s, sent tex: %s",sent_id,raw_text)
 
         metadata["sent_id"].append(sent_id)
+        text_raw = clean_sentence(raw_text)
         metadata["raw_text"].append(raw_text)
         metadata["tokens"].append(get_tokens(raw_text))
         sent_list.append(raw_text)
-    sent_list = clean_sentences(sent_list)
     return sent_list,metadata
 def parse_sentences(file_path= None,mode = None):
     base,ext = os.path.splitext(file_path)

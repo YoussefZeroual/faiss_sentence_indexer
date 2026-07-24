@@ -52,9 +52,11 @@ def concat_forms(text):
 
     else:
         raw_text = re.findall(r'^\d+\s+(\S+)', text, re.MULTILINE)
+
         raw_text = " ".join(raw_text)
         raw_text = fix_punctuation_spaces(raw_text)
-    return raw_text
+        tokens = get_tokens(raw_text)
+    return raw_text,tokens
 
 def get_sent_id(text):
     match = re.search(r'^#\s*sent_id\s*=\s*(\S+)', text, re.MULTILINE)
@@ -62,8 +64,18 @@ def get_sent_id(text):
 def clean_sentences(sent_list):
     return [sent.replace("_","") for sent in sent_list]
 #--------parsing functions------
+def get_tokens(text):
+    if '\'' in text:
+        text = text.replace("\'","\'\n").strip()
+        text = text.replace(" ","\n").strip()
+        return text.split("\n")
+    else:
+        return text.split(" ")
+
 def parse_conllu_fast(file_path,text=None):
-    metadata = {"sent_id": [], "raw_text": []}
+    metadata = {"sent_id": [],
+                "raw_text": [],
+                "tokens":[]}
     sent_list = []
     sent_id = None
     text_raw = None
@@ -89,6 +101,7 @@ def parse_conllu_fast(file_path,text=None):
                 metadata["sent_id"].append(sent_id)
                 metadata["raw_text"].append(text_raw)
                 sent_list.append(text_raw)
+                metadata["tokens"].append(get_tokens(text_raw))
             sent_id, text_raw = None, None
     # catch the last sentence if file doesn't end with a blank line
     if sent_id is not None:
@@ -100,17 +113,18 @@ def parse_conllu_fast(file_path,text=None):
     if (sent_list == []) or (sum(x is None for x in sent_list) >= 3):
         logger.warning("sent_list has None entries, falling back to form concatenation method")
         raw_entries = parse_conllu_raw_entries(content)
-        metadata = {"sent_id": [], "raw_text": []}
+        metadata = {"sent_id": [], "raw_text": [],"tokens":[]}
         sent_list = []
         sent_id = None
         text_raw = None
         for i,sent in enumerate(raw_entries):
-            text_raw = concat_forms(sent)
+            text_raw,tokens = concat_forms(sent)
             sent_id = get_sent_id(sent)
             if sent_id is None:
                 sent_id = i
             metadata["sent_id"].append(sent_id)
             metadata["raw_text"].append(text_raw)
+            metadata["tokens"].append(tokens)
             sent_list.append(text_raw)
     sent_list = clean_sentences(sent_list)
     return sent_list, metadata
@@ -119,8 +133,10 @@ def parse_conllu_fast(file_path,text=None):
 
 
 def fix_punctuation_spaces(text):
+    if isinstance(text,list):
+        text = ' '.join(text)
     # 1. Fix apostrophes (remove spaces around them)
-    text = re.sub(r"\s+'", "'", text)  # space before apostrophe
+    text = re.sub(r"\s+\'", "'", text)  # space before apostrophe
     text = re.sub(r"'\s+", "'", text)  # space after apostrophe
 
     # 2. Fix spaces before French punctuation (:, ;, ?, !, »)
@@ -149,14 +165,15 @@ def parse_sentences_xml_conllu(filepath):
     tree = etree.fromstring(data,parser=parser)
     sentences = tree.xpath("//s")
     len_s = len(sentences)
-    metadata = {"sent_id":[],
-                 "raw_text":[]}
+    metadata = {"sent_id": [],
+                "raw_text": [],
+                "tokens":[]}
     sent_list = []
     for s in sentences:
         sent_id = s.get("id")
         if s.text is not None and "\n" in s.text:# and "\t" in s.text:
             logger.warning("detected multiline text inside <s>, using contained CONLLU mode, sentence_id=%s,",sent_id)
-            raw_text = concat_forms(s.text)
+            raw_text,tokens = concat_forms(s.text)
             raw_text = fix_punctuation_spaces(raw_text)
         elif s.text is None:
             logger.warning("Sentid=%s:<s> text is empty, looking for children texts",sent_id)
@@ -166,9 +183,10 @@ def parse_sentences_xml_conllu(filepath):
         else:
             raw_text = s.text
             logger.debug("Sentid %s, sent tex: %s",sent_id,raw_text)
-
+            tokens = get_tokens(raw_text)
         metadata["sent_id"].append(sent_id)
         metadata["raw_text"].append(raw_text)
+        metadata["tokens"].append(tokens)
         sent_list.append(raw_text)
     sent_list = clean_sentences(sent_list)
     return sent_list,metadata
@@ -181,8 +199,9 @@ def parse_sentence_trs(file_path=None):
     tree = etree.fromstring(data,parser=parser)
     sentences = tree.xpath("//Turn")
     len_s = len(sentences)
-    metadata = {"sent_id":[],
-                 "raw_text":[]}
+    metadata = {"sent_id": [],
+                "raw_text": [],
+                "tokens":[]}
     sent_list = []
     for s in sentences:
         sent_id = s.get("startTime")
@@ -192,6 +211,7 @@ def parse_sentence_trs(file_path=None):
 
         metadata["sent_id"].append(sent_id)
         metadata["raw_text"].append(raw_text)
+        metadata["tokens"].append(get_tokens(raw_text))
         sent_list.append(raw_text)
     sent_list = clean_sentences(sent_list)
     return sent_list,metadata
@@ -236,7 +256,7 @@ def parse_sentences(file_path= None,mode = None):
     return sent_list,metadata
 
 
-def calcEmbeddings(collection_file_path=None, output_file_path=None, mode="conllu",reduce_precision=False,overwrite=False):
+def calcEmbeddings(collection_file_path=None, output_file_path=None, mode="conllu",reduce_precision=False,overwrite=False,token_mode=False):
 
     base, ext = os.path.splitext(collection_file_path)
     if (not overwrite) and  (os.path.exists(base+".npy")) and os.path.exists(base+".json"):
@@ -250,7 +270,12 @@ def calcEmbeddings(collection_file_path=None, output_file_path=None, mode="conll
     logger.info("Encoding sentences with model")
 
     t0 = time.perf_counter()
-    embeddings = encode(sentence_list, chunk_size=500)
+    if token_mode:
+        logger.info("using token level embedding mode")
+        embeddings = encode(sentence_list, chunk_size=100,token_mode=True)
+    else:
+        logger.info("using sentence level embedding mode")
+        embeddings = encode(sentence_list, chunk_size=100)
     t1 = time.perf_counter()
     procession_time = t1-t0
     logger.info("Embeddings created in %s seconds",np.round(procession_time,2))

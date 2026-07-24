@@ -30,12 +30,15 @@ def load_metadata(matadata_file_path=None):
         logger.warning("Couldn't load metadata")
         raise ValueError("Couldnt load metadata")
 
-def embedd_query(query_str=None):
+def embedd_query(query_str=None,token_mode=False):
     import time
     t0 = time.perf_counter()
     if query_str is not None:
         logger.info("embedding query:%s",query_str)
-        embeddings = encode([query_str],chunk_size=1)
+        if token_mode:
+            embeddings = encode([query_str],chunk_size=1,token_mode=True)
+        else:
+            embeddings = encode([query_str],chunk_size=1)
         import numpy as np
         t1 = time.perf_counter()
         exec_time = t1-t0
@@ -48,13 +51,13 @@ def embedd_query(query_str=None):
         logger.warning("Query is empty")
         raise ValueError("Query is empty")
 
-def search(query_vector=None,query_str=None, index=None, metric_type=None, top_k=10, metadata=None):
+def search(query_vector=None,query_str=None, index=None, metric_type=None, top_k=10, metadata=None,token_mode=False):
     metadata = metadata
     len_metadata = len(metadata["raw_text"])
     if query_vector is not None:
         query_vector =query_vector
     else:
-        query_vector = embedd_query(query_str)
+        query_vector = embedd_query(query_str,token_mode)
     faiss.normalize_L2(query_vector)
     if hasattr(index, "nprobe"):
         index.nprobe = 8

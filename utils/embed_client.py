@@ -37,13 +37,13 @@ def _start_daemon():
     raise RuntimeError("Embedding daemon failed to start")
 
 
-def encode(sentences, chunk_size=512, show_progress=True):
+def encode(sentences, chunk_size=512, show_progress=True,token_mode=False):
     conn = _try_connect()
     if conn is None:
         conn = _start_daemon()
 
     job_id = str(uuid.uuid4())
-    conn.send((job_id, sentences, chunk_size))
+    conn.send((job_id, sentences, chunk_size,token_mode))
 
     status, payload = None, None
     while True:

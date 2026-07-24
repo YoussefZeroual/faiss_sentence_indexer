@@ -5,7 +5,11 @@ import sys
 import threading
 import time
 from multiprocessing.connection import Listener
+import torch.nn.functional as F
 
+from torch import Tensor
+from transformers import AutoTokenizer, AutoModel
+import torch
 import numpy as np
 from sentence_transformers import SentenceTransformer
 
@@ -23,14 +27,28 @@ logging.basicConfig(
 logger = logging.getLogger("embed_daemon")
 
 model = None
+tokenizer = None
+token_model = None
 batch_queue: "queue.Queue" = queue.Queue()  # items: (sentences_list, result_queue)
 
+def average_pool(last_hidden_states: Tensor,
+                 attention_mask: Tensor) -> Tensor:
+    last_hidden = last_hidden_states.masked_fill(~attention_mask[..., None].bool(), 0.0)
+    return last_hidden.sum(dim=1) / attention_mask.sum(dim=1)[..., None]
+
+def average_pool_last_n_layers(hidden_states: tuple[Tensor, ...],
+                                attention_mask: Tensor,
+                                num_layers: int = 4) -> Tensor:
+    # hidden_states = model(**inputs, output_hidden_states=True).hidden_states
+    stacked = torch.stack(hidden_states[-num_layers:])   # (n, batch, seq, hidden)
+    layer_avg = stacked.mean(dim=0)                       # (batch, seq, hidden)
+    return average_pool(layer_avg, attention_mask)
 
 def batching_worker():
     """Single thread owns the GPU. Pulls whatever chunks are waiting,
     concatenates them into one encode() call, splits results back out."""
     while True:
-        sentences, result_q = batch_queue.get()  # blocks for first item
+        sentences, result_q, token_mode = batch_queue.get()  # blocks for first item
         batch_items = [(sentences, result_q)]
         batch_sentences = list(sentences)
 
@@ -47,7 +65,14 @@ def batching_worker():
             batch_sentences.extend(s)
 
         try:
-            vecs = model.encode(batch_sentences).astype(np.float32)
+            if token_mode:
+                batch_dict = tokenizer(batch_sentences, max_length=512, padding=True, truncation=True, return_tensors='pt')
+                batch_dict = {k: v.to('cuda') for k, v in batch_dict.items()}  # Move to GPU
+                outputs = token_model(**batch_dict, output_hidden_states=True)
+                vecs = average_pool_last_n_layers(outputs.hidden_states, batch_dict["attention_mask"], num_layers=4)
+                vecs = vecs.cpu().detach().numpy().astype(np.float32)
+            else:
+                vecs = model.encode(batch_sentences).astype(np.float32)
         except Exception as e:
             logger.exception("Batch encode failed (%d sentences, %d jobs)",
                               len(batch_sentences), len(batch_items))
@@ -66,17 +91,18 @@ def handle_client(conn):
     """One thread per connection. Pure I/O + queue handoff, no GPU work here."""
     job_id = None
     try:
-        job_id, sentences, chunk_size = conn.recv()
+        job_id, sentences, chunk_size, token_mode = conn.recv()
         logger.info("Job %s: %d sentences, chunk_size=%d", job_id, len(sentences), chunk_size)
 
         total = len(sentences)
+        print(token_mode)
         all_vecs = []
         conn.send(("progress", 0, total))
 
         for i in range(0, total, chunk_size):
             chunk = sentences[i:i + chunk_size]
             result_q = queue.Queue()
-            batch_queue.put((chunk, result_q))
+            batch_queue.put((chunk, result_q, token_mode))
             status, payload = result_q.get()  # waits for the batching worker
 
             if status == "error":
@@ -113,11 +139,18 @@ def accept_loop(listener):
 
 def main():
     global model
+    global tokenizer
+    global token_model
     logger.info("Daemon starting")
 
-    logger.info("Loading model...")
+    logger.info("Loading models...")
     model = SentenceTransformer(MODEL_NAME)
-    logger.info("Model loaded successfully")
+    model.to('cuda')  # Move BGE-M3 to GPU
+
+    tokenizer = AutoTokenizer.from_pretrained('intfloat/multilingual-e5-base')
+    token_model = AutoModel.from_pretrained('intfloat/multilingual-e5-base')
+    token_model.to('cuda')  # Move e5-base to GPU
+    logger.info("Models loaded successfully")
 
     threading.Thread(target=batching_worker, daemon=True).start()
 

@@ -37,13 +37,14 @@ def parse_args():
     parser.add_argument("--search_only",action="store_true",help="searches presuming index files already exist to skip checking and improve speed (only in folder mode)")
     parser.add_argument("--regenerate_metadata",action="store_true",help="regenerate metadata of a folder or a file")
     parser.add_argument("--warn",action="store_true",help="enables log for warnings only")
+    parser.add_argument("--token_emb",action="store_true",help="enables token level embedding mode instead of sentence embedding")
     return parser.parse_args()
 def process(args,index, metric_type=faiss.METRIC_INNER_PRODUCT, metadata=None):
     query_str=args.query
     top_k=args.top_k
     import time
     t0 = time.perf_counter()
-    result = search(query_str=args.query, index=index, metric_type=faiss.METRIC_INNER_PRODUCT, top_k=args.top_k, metadata=metadata)
+    result = search(query_str=args.query, index=index, metric_type=faiss.METRIC_INNER_PRODUCT, top_k=args.top_k, metadata=metadata,token_mode=args.token_emb)
     t1 = time.perf_counter()
     exec_time = t1 - t0
     print("Sent id               | Sentence    | similarity score")
@@ -72,6 +73,10 @@ def main():
     embeddings_missing = args.force or not os.path.exists(output_embeddings) or not os.path.exists(output_metadata)
     index_missing = args.force or (embeddings_missing) or (not os.path.exists(output_index))
     metadata_messing = not os.path.exists(output_metadata)
+    if not args.log:
+        logging.getLogger("searchEmbedding").setLevel(logging.ERROR)
+        logging.getLogger("calcEmbeddings").setLevel(logging.ERROR)
+        logging.getLogger("makeIndex").setLevel(logging.ERROR)
     if args.log:
         logging.getLogger("searchEmbedding").setLevel(logging.INFO)
         logging.getLogger("calcEmbeddings").setLevel(logging.INFO)
@@ -131,7 +136,8 @@ def main():
 
     elif embeddings_missing and index_missing:
         embeddings, metadata = calcEmbeddings(input_file, output_embeddings, mode,
-                                               reduce_precision=args.reduce_precision,overwrite=args.force)
+                                               reduce_precision=args.reduce_precision,overwrite=args.force,token_mode=args.token_emb)
+        print(embeddings.shape)
         save_metadata(metadata, output_metadata)
         makeIndex(embeddings=embeddings, embedding_file_path=None,
                                metric_type=faiss.METRIC_INNER_PRODUCT,

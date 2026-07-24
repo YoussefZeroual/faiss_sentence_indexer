@@ -1,6 +1,7 @@
 import numpy as np
 import json
 import logging
+MISSING_SENTENCE = "[phrase manquante]"
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -13,6 +14,7 @@ logger = logging.getLogger(__name__)
 from utils.embed_client import encode
 
 import faiss
+
 def load_index(index_file=None):
     logger.info("loading index from:%s",index_file)
     if index_file is not None:

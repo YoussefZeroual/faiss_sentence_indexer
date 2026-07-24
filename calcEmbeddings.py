@@ -13,6 +13,7 @@ import os
 from makeIndex import load_embeddings
 from searchEmbedding import load_metadata,load_index
 from utils.embed_client import encode
+MISSING_SENTENCE = "[phrase manquante]"
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -61,11 +62,17 @@ def concat_forms(text):
 def get_sent_id(text):
     match = re.search(r'^#\s*sent_id\s*=\s*(\S+)', text, re.MULTILINE)
     return match.group(1) if match else None
-def clean_sentence(sent):
+def clean_sentence(sent,filename,sent_id):
+    if sent is None or not sent.split():
+        logger.warning("Empty sentence, filling with [phrase manquante]],sent_id=%s,filename=%s",sent_id,filename)
+        return MISSING_SENTENCE
     return sent.replace("_","").replace("  "," ")
 #--------parsing functions------
 def get_tokens(text):
-    if '\'' in text:
+    if text is None:
+        return text
+    match = re.findall(r'\'',text)
+    if match !=[]:
         text = text.replace("\'","\'\n").strip()
         text = text.replace(" ","\n").strip()
         return text.split("\n")
@@ -106,13 +113,13 @@ def parse_conllu_fast(file_path,text=None):
     # catch the last sentence if file doesn't end with a blank line
     if sent_id is not None:
         metadata["sent_id"].append(sent_id)
-        text_raw = clean_sentence(text_raw)
+        text_raw = clean_sentence(text_raw,file_path,sent_id)
         metadata["raw_text"].append(text_raw)
         sent_list.append(text_raw)
 
     #check if the raw text is empty to fallback to 2nd parsing method
     if (sent_list == []) or (sum(x is None for x in sent_list) >= 3):
-        logger.warning("sent_list has None entries, falling back to form concatenation method")
+        logger.info("sent_list has None entries, falling back to form concatenation method")
         raw_entries = parse_conllu_raw_entries(content)
         metadata = {"sent_id": [], "raw_text": [],"tokens":[]}
         sent_list = []
@@ -123,7 +130,7 @@ def parse_conllu_fast(file_path,text=None):
             sent_id = get_sent_id(sent)
             if sent_id is None:
                 sent_id = i
-            text_raw = clean_sentence(text_raw)
+            text_raw = clean_sentence(text_raw,file_path,sent_id)
             metadata["sent_id"].append(sent_id)
             metadata["raw_text"].append(text_raw)
             metadata["tokens"].append(tokens)
@@ -173,7 +180,7 @@ def parse_sentences_xml_conllu(filepath):
     for s in sentences:
         sent_id = s.get("id")
         if s.text is not None and "\n" in s.text:# and "\t" in s.text:
-            logger.warning("detected multiline text inside <s>, using contained CONLLU mode, sentence_id=%s,",sent_id)
+            logger.info("detected multiline text inside <s>, using contained CONLLU mode, sentence_id=%s,",sent_id)
             raw_text,tokens = concat_forms(s.text)
             raw_text = fix_punctuation_spaces(raw_text)
         elif s.text is None:
@@ -186,8 +193,8 @@ def parse_sentences_xml_conllu(filepath):
             logger.debug("Sentid %s, sent tex: %s",sent_id,raw_text)
             tokens = get_tokens(raw_text)
         metadata["sent_id"].append(sent_id)
+        raw_text = clean_sentence(raw_text,filepath,sent_id)
         metadata["raw_text"].append(raw_text)
-        raw_text = clean_sentence(raw_text)
         metadata["tokens"].append(tokens)
         sent_list.append(raw_text)
     return sent_list,metadata
@@ -211,7 +218,7 @@ def parse_sentence_trs(file_path=None):
         logger.info("Sentid %s, sent tex: %s",sent_id,raw_text)
 
         metadata["sent_id"].append(sent_id)
-        text_raw = clean_sentence(raw_text)
+        text_raw = clean_sentence(raw_text,file_path,sent_id)
         metadata["raw_text"].append(raw_text)
         metadata["tokens"].append(get_tokens(raw_text))
         sent_list.append(raw_text)
@@ -224,8 +231,7 @@ def parse_sentences(file_path= None,mode = None):
         logger.info("Parsing CONLLU sentences")
         sent_list,metadata = parse_conllu_fast(file_path)
         len_s = len(sent_list)
-        sent_list = [sent if sent is not None else "[phrase manquante]" for sent in sent_list]
-        n_tokens = sum(len(re.findall(r'\w+|[^\w\s]', sent)) for sent in sent_list if sent !="[phrase manquante]")
+        n_tokens = sum(len(re.findall(r'\w+|[^\w\s]', sent)) for sent in sent_list if sent !=MISSING_SENTENCE)
         t1 = time.perf_counter()
         ex_time = t1-t0
         logger.info("Parsed %s sentences, %s tokens in %s seconds",len_s,n_tokens,np.round(ex_time,2))
@@ -235,8 +241,7 @@ def parse_sentences(file_path= None,mode = None):
         logger.info("Parsing xml sentences")
         sent_list,metadata = parse_sentences_xml_conllu(file_path)
         len_s = len(sent_list)
-        sent_list = [sent if sent is not None else "[phrase manquante]" for sent in sent_list]
-        n_tokens = sum(len(re.findall(r'\w+|[^\w\s]', sent)) for sent in sent_list if sent !="[phrase manquante]")
+        n_tokens = sum(len(re.findall(r'\w+|[^\w\s]', sent)) for sent in sent_list if sent !=MISSING_SENTENCE)
         t1 = time.perf_counter()
         ex_time = t1-t0
         logger.info("Parsed %s sentences, %s tokens in %s seconds",len_s,n_tokens,np.round(ex_time,2))
@@ -246,8 +251,7 @@ def parse_sentences(file_path= None,mode = None):
         logger.info("Parsing trs sentences")
         sent_list,metadata = parse_sentence_trs(file_path)
         len_s = len(sent_list)
-        sent_list = [sent if sent is not None else "[phrase manquante]" for sent in sent_list]
-        n_tokens = sum(len(re.findall(r'\w+|[^\w\s]', sent)) for sent in sent_list if sent !="[phrase manquante]")
+        n_tokens = sum(len(re.findall(r'\w+|[^\w\s]', sent)) for sent in sent_list if sent !=MISSING_SENTENCE)
         t1 = time.perf_counter()
         ex_time = t1-t0
         logger.info("Parsed %s sentences, %s tokens in %s seconds",len_s,n_tokens,np.round(ex_time,2))

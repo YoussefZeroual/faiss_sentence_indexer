@@ -33,11 +33,11 @@ def parse_args():
     parser.add_argument("--folder", action="store_true",
                          help="process a folder")
     parser.add_argument("--log",action="store_true",help="enables logging info")
-    parser.add_argument("--encode_only",action="store_true",help="encodes files and creates indexes without running queries (only in folder mode)")
-    parser.add_argument("--search_only",action="store_true",help="searches presuming index files already exist to skip checking and improve speed (only in folder mode)")
-    parser.add_argument("--regenerate_metadata",action="store_true",help="regenerate metadata of a folder or a file")
+    parser.add_argument("--encode-only",action="store_true",help="encodes files and creates indexes without running queries (only in folder mode)")
+    parser.add_argument("--search-only",action="store_true",help="searches presuming index files already exist to skip checking and improve speed (only in folder mode)")
+    parser.add_argument("--regenerate-metadata",action="store_true",help="regenerate metadata of a folder or a file")
     parser.add_argument("--warn",action="store_true",help="enables log for warnings only")
-    parser.add_argument("--token_emb",action="store_true",help="enables token level embedding mode instead of sentence embedding")
+    parser.add_argument("--token-emb",action="store_true",help="enables token level embedding mode instead of sentence embedding")
     return parser.parse_args()
 def process(args,index, metric_type=faiss.METRIC_INNER_PRODUCT, metadata=None):
     query_str=args.query
@@ -59,6 +59,11 @@ def process_folder(args,input_file):
         else:
             files = glob.glob(base+"/"+"*faiss")
         print("Processing folder: searching similarity in",len(files),"index files")
+        print("Checking folder for missing indices or metadata")
+        indices = glob.glob(base+"/"+"*faiss")
+        metadata_ = glob.glob(base+"/"+"*json")
+        len_indices = len(indices)
+        len_metadata = len(metadata_)
         if args.force:
             encode_folder(input_file,overwrite=True,token_mode=args.token_emb)
             makeIndex_folder(input_folder=input_file,metric_type=faiss.METRIC_INNER_PRODUCT,index_type="ivfpq",overwrite=True,token_mode= args.token_emb)
@@ -94,25 +99,26 @@ def main():
         sys.exit(f"Error: input file not found: {input_file}")
 
     if args.regenerate_metadata:
-        files = glob.glob(base+"/"+"*conllu")
-        files.extend (glob.glob(base+"/"+"*xml"))
-
+        files = []
+        if '*' in input_file:
+            files = glob.glob(input_file)
+            files = [f for f in files if ".conllu" in f or '.xml' in f or '.trs' in f]
+        if folder:
+            files = glob.glob(input_file+"/*")
         metadata = None
         len_f = len(files)
-        if args.folder:
+        if args.folder or "*" in input_file:
             logger.info("regenerating metadata for %s files",len(files))
             for i,f in enumerate(files):
                 logger.info("regenerating metadata for file %s/%s filename=%s",i,len_f,f)
                 _,metadata = parse_sentences(f)
                 base, ext = os.path.splitext(f)
                 save_metadata(metadata,base+".json")
-            process_folder(args,base)
         elif not args.folder:
             logger.info("regenerating metadata for %s",input_file)
             _,metadata = parse_sentences(input_file)
             index = load_index(base+".faiss")
             save_metadata(metadata,base+".json")
-            process(args,index=index,metadata=metadata)
 
         return True
     if ext == ".faiss" :
@@ -120,9 +126,41 @@ def main():
         index = load_index(output_index)
         process(args,index=index,metadata=metadata)
         return True
-    if args.encode_only and folder:
-        encode_folder(input_file,overwrite=args.force)
-        makeIndex_folder(input_folder=input_file,metric_type=faiss.METRIC_INNER_PRODUCT,index_type="ivfpq",overwrite=args.force)
+    if args.encode_only and (folder or "*" in input_file):
+        files = glob.glob(input_file)
+        files = [f for f in files if os.path.splitext(f)[1] in ['.conllu','.xml','.trs']]
+        token_ext = ""
+        if args.token_emb:
+            token_ext = "_token"
+        print("checking and encoding",len(files),"files")
+        for f in files:
+            print("processing file",f)
+            print("------")
+            base,ext = os.path.splitext(f)
+            index_file = base+token_ext+'.faiss'
+            metadata_file = base+'.json'
+            embs_file = base+token_ext+'.npy'
+
+            if not os.path.exists(metadata_file) and not args.force:
+                print("metadata file not found",metadata_file)
+                _,metadata = parse_sentences(f)
+                save_metadata(metadata,base+".json")
+            else:
+                print("Found metadata file",metadata_file)
+            if not os.path.exists(embs_file) and not args.force:
+                print("Embeddings file not found, regenerating",metadata_file)
+                embeddings, metadata = calcEmbeddings(collection_file_path=f, output_file_path=embs_file, mode=ext.replace('.','').strip(),
+                                               reduce_precision=args.reduce_precision,overwrite=args.force,token_mode=args.token_emb)
+            else:
+                print("Found embeddings file",embs_file)
+            if not os.path.exists(index_file) and not args.force:
+                print("Index file not found, building",index_file)
+                index=makeIndex(embeddings=None, embedding_file_path=embs_file,
+                               metric_type=faiss.METRIC_INNER_PRODUCT,
+                               index_type=args.index_type, output_file_path=index_file)
+            else:
+                print("Found index file",index_file)
+            print("------")
         return True
     if args.search_only and folder:
         query_vector = embedd_query(args.query)
@@ -145,7 +183,6 @@ def main():
     elif (embeddings_missing and index_missing) or args.force:
         embeddings, metadata = calcEmbeddings(input_file, output_embeddings, mode,
                                                reduce_precision=args.reduce_precision,overwrite=args.force,token_mode=args.token_emb)
-        print(embeddings.shape)
         save_metadata(metadata, output_metadata)
         index=makeIndex(embeddings=embeddings, embedding_file_path=None,
                                metric_type=faiss.METRIC_INNER_PRODUCT,

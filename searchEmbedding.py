@@ -30,7 +30,7 @@ def load_metadata(matadata_file_path=None):
         return metadata
     else:
         logger.warning("Couldn't load metadata")
-        raise ValueError("Couldnt load metadata")
+        return None
 
 def embedd_query(query_str=None,token_mode=False):
     if token_mode:
@@ -99,7 +99,6 @@ def search_folder(input_folder=None,query_str=None,query_vector=None,metric_type
         file_list = list(set([f for f in file_list if os.path.splitext(f)[1] ==".faiss" and '_token' in f]))
     else:
         file_list = list(set([f for f in file_list if os.path.splitext(f)[1] ==".faiss"]))
-    print(file_list)
     len_f = len(file_list)
     results = []
     skipped = False

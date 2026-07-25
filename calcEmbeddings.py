@@ -177,10 +177,12 @@ def parse_sentences_xml_conllu(filepath):
                 "raw_text": [],
                 "tokens":[]}
     sent_list = []
+    xml_conllu = 0
     for s in sentences:
         sent_id = s.get("id")
         if s.text is not None and "\n" in s.text:# and "\t" in s.text:
-            logger.info("detected multiline text inside <s>, using contained CONLLU mode, sentence_id=%s,",sent_id)
+            xml_conllu +=1
+            #logger.info("detected multiline text inside <s>, using contained CONLLU mode, sentence_id=%s,",sent_id)
             raw_text,tokens = concat_forms(s.text)
             raw_text = fix_punctuation_spaces(raw_text)
         elif s.text is None:
@@ -197,6 +199,8 @@ def parse_sentences_xml_conllu(filepath):
         metadata["raw_text"].append(raw_text)
         metadata["tokens"].append(tokens)
         sent_list.append(raw_text)
+    if xml_conllu > 0:
+        logger.info("Detected and parsed %s XML-CoNLLU sentences,filename=%s",xml_conllu,filepath)
     return sent_list,metadata
 def parse_sentence_trs(file_path=None):
     logger.info("mode is trs")
@@ -226,7 +230,7 @@ def parse_sentences(file_path= None,mode = None):
     mode = ext.replace(".","")
     if mode == "conllu":
         t0 = time.perf_counter()
-        logger.info("Parsing CONLLU sentences")
+        logger.info("Parsing CONLLU sentences,filename=%s",file_path)
         sent_list,metadata = parse_conllu_fast(file_path)
         len_s = len(sent_list)
         n_tokens = 0
@@ -240,7 +244,7 @@ def parse_sentences(file_path= None,mode = None):
         return sent_list,metadata
     elif mode == "xml":
         t0 = time.perf_counter()
-        logger.info("Parsing xml sentences")
+        logger.info("Parsing xml sentences,filename=%s",file_path)
         sent_list,metadata = parse_sentences_xml_conllu(file_path)
         len_s = len(sent_list)
         n_tokens = sum(len(re.findall(r'\w+|[^\w\s]', sent)) for sent in sent_list if sent !=MISSING_SENTENCE)
@@ -250,7 +254,7 @@ def parse_sentences(file_path= None,mode = None):
         return sent_list,metadata
     elif mode == "trs":
         t0 = time.perf_counter()
-        logger.info("Parsing trs sentences")
+        logger.info("Parsing trs sentences,filename=%s",file_path)
         sent_list,metadata = parse_sentence_trs(file_path)
         len_s = len(sent_list)
         n_tokens = sum(len(re.findall(r'\w+|[^\w\s]', sent)) for sent in sent_list if sent !=MISSING_SENTENCE)
@@ -258,19 +262,20 @@ def parse_sentences(file_path= None,mode = None):
         ex_time = t1-t0
         logger.info("Parsed %s sentences, %s tokens in %s seconds",len_s,n_tokens,np.round(ex_time,2))
     else:
-        logger.warning("File format not recognized: %s",ext)
+        logger.warning("File format not recognized: %s,filename=%s",ext,file_path)
         return None,None
     return sent_list,metadata
 
 
 def calcEmbeddings(collection_file_path=None, output_file_path=None, mode="conllu",reduce_precision=False,overwrite=False,token_mode=False):
-    if token_mode:
+    token_suffix=""
+    if token_mode and not "_token":
         token_suffix = "_token"
     base, ext = os.path.splitext(collection_file_path)
-    if (not overwrite) and  (os.path.exists(base+".npy")) and os.path.exists(base+token_suffix+".json"):
+    if (not overwrite) and  (os.path.exists(base+token_suffix+".npy")) and os.path.exists(base+".json"):
         logger.warning("embedding file and metadata file already exist, loading from %s and %s",base+token_suffix+".npy",base+token_suffix+".json")
         embeddings = load_embeddings(base+".npy")
-        metadata= load_metadata(base+token_suffix+".json")
+        metadata= load_metadata(base+".json")
         return embeddings,metadata
 
     logger.info("parsing sentences, file=%s mode=%s",collection_file_path,mode)
@@ -288,7 +293,7 @@ def calcEmbeddings(collection_file_path=None, output_file_path=None, mode="conll
     t1 = time.perf_counter()
     procession_time = t1-t0
     logger.info("Embeddings created in %s seconds",np.round(procession_time,2))
-    logger.info("saving embeddings to %s", output_file_path)
+    logger.info("saving embeddings to %s", output_file_path.replace("_token_token","_token"))
     if reduce_precision:
         np.save(output_file_path,embeddings.astype(np.float16))
     else:

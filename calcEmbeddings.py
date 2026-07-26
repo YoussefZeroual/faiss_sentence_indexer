@@ -269,11 +269,12 @@ def parse_sentences(file_path= None,mode = None):
 
 def calcEmbeddings(collection_file_path=None, output_file_path=None, mode="conllu",reduce_precision=False,overwrite=False,token_mode=False):
     token_suffix=""
-    if token_mode and not "_token":
+    if token_mode and "_token" not in output_file_path :
         token_suffix = "_token"
+
     base, ext = os.path.splitext(collection_file_path)
-    if (not overwrite) and  (os.path.exists(base+token_suffix+".npy")) and os.path.exists(base+".json"):
-        logger.warning("embedding file and metadata file already exist, loading from %s and %s",base+token_suffix+".npy",base+token_suffix+".json")
+    if (not overwrite) and  (os.path.exists(output_file_path)) and os.path.exists(base+".json"):
+        logger.warning("embedding file and metadata file already exist, loading from %s and %s",output_file_path,base+token_suffix+".json")
         embeddings = load_embeddings(base+".npy")
         metadata= load_metadata(base+".json")
         return embeddings,metadata

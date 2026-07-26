@@ -7,7 +7,7 @@ import faiss
 import numpy as np
 
 from calcEmbeddings import calcEmbeddings, save_metadata, parse_sentences,encode_folder
-from makeIndex import makeIndex,makeIndex_folder
+from makeIndex import makeIndex,makeIndex_folder,load_embeddings
 from utils.embed_client import encode
 from searchEmbedding import search, load_metadata, load_index, search_folder,embedd_query
 import logging
@@ -18,10 +18,66 @@ logging.basicConfig(
     #filename='/home/miai_guest/zeroualy/module_faiss/app.log'
 )
 logger = logging.getLogger(__name__)
+def process_no_faiss(args):
+    print("Using no faiss mode: calculating cosine sim directly on embeddings")
+    print("-----------")
+    results = []
+    token_ext = ""
+    if args.token_emb:
+        token_ext = "_token"
+    if not args.no_faiss:
+        return False
+    query_embs = embedd_query(query_str=args.query,token_mode=args.token_emb)
+    faiss.normalize_L2(query_embs)
+    if args.folder or '*' in args.input_file:
+        files = glob.glob(args.input_file)
+        files = [f for f in files if os.path.splitext(f)[1] in ['.conllu','.xml','.trs']]
+
+
+        len_f = len(files)
+        for f in files:
+            base,ext = os.path.splitext(f)
+            try:
+                embs = load_embeddings(base+token_ext+".npy")
+                faiss.normalize_L2(embs)
+            except FileNotFoundError as e:
+                print("File not found:",base+token_ext+".npy","skipping")
+                continue
+            try:
+                result = query_embs@embs.T
+            except ValueError as e:
+                print("Embedding and query dimension mismatch, skipping file:",base+token_ext+".npy")
+                print("query dim",query_embs.shape,"embs dim",embs.shape)
+                continue
+            result = result[0]
+            result = [np.round(float(r),3) for r in result]
+            metadata = load_metadata(base+".json")
+            results.extend(zip([f]*len(result),metadata["sent_id"],metadata["raw_text"],result))
+    else:
+        base,ext = os.path.splitext(args.input_file)
+        embs = load_embeddings(base+token_ext+".npy")
+        faiss.normalize_L2(embs)
+        try:
+            result = query_embs@embs.T
+        except ValueError as e:
+            print("Embedding and query dimension mismatch, skipping file")
+            print("query dim",query_embs.shape,"embs dim",embs.shape)
+            return False
+        result = result[0]
+        result = [np.round(float(r),3) for r in result]
+        metadata = load_metadata(base+".json")
+        results.extend(zip([args.input_file]*len(result),metadata["sent_id"],metadata["raw_text"],result))
+    results.sort(key=lambda x:x[3],reverse=True)
+    print("--------------")
+    print("Query results")
+    print("--------------")
+    print("Collection file                             | sent_id         | Sentence     | SImilarity score")
+    for r in results[:args.top_k]:
+        print(r[0],"|   ",r[1],"   ",r[2],"|   ",r[3])
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Semantic search over a corpus using FAISS.")
-    parser.add_argument("input_file", help="Path to the corpus file (.conllu or .xml)")
+    parser.add_argument("input_file", help="Path to the corpus file (.conllu, .xml or .trs)")
     parser.add_argument("query", help="Query string to search for")
     parser.add_argument("--index-type", choices=["flat", "hnsw", "ivfpq"], default="ivfpq",
                          help="FAISS index type (default: flat)")
@@ -38,6 +94,7 @@ def parse_args():
     parser.add_argument("--regenerate-metadata",action="store_true",help="regenerate metadata of a folder or a file")
     parser.add_argument("--warn",action="store_true",help="enables log for warnings only")
     parser.add_argument("--token-emb",action="store_true",help="enables token level embedding mode instead of sentence embedding")
+    parser.add_argument("--no-faiss",action="store_true",help="processes a query using models directly without FAISS indexation, for testing purpose")
     return parser.parse_args()
 def process(args,index, metric_type=faiss.METRIC_INNER_PRODUCT, metadata=None):
     query_str=args.query
@@ -59,11 +116,6 @@ def process_folder(args,input_file):
         else:
             files = glob.glob(base+"/"+"*faiss")
         print("Processing folder: searching similarity in",len(files),"index files")
-        print("Checking folder for missing indices or metadata")
-        indices = glob.glob(base+"/"+"*faiss")
-        metadata_ = glob.glob(base+"/"+"*json")
-        len_indices = len(indices)
-        len_metadata = len(metadata_)
         if args.force:
             encode_folder(input_file,overwrite=True,token_mode=args.token_emb)
             makeIndex_folder(input_folder=input_file,metric_type=faiss.METRIC_INNER_PRODUCT,index_type="ivfpq",overwrite=True,token_mode= args.token_emb)
@@ -81,6 +133,9 @@ def main():
     embeddings_missing = args.force or not os.path.exists(output_embeddings) or not os.path.exists(output_metadata)
     index_missing = args.force or (embeddings_missing) or (not os.path.exists(output_index))
     metadata_messing = not os.path.exists(output_metadata)
+
+
+
     if not args.log:
         logging.getLogger("searchEmbedding").setLevel(logging.ERROR)
         logging.getLogger("calcEmbeddings").setLevel(logging.ERROR)
@@ -93,6 +148,9 @@ def main():
         logging.getLogger("searchEmbedding").setLevel(logging.WARNING)
         logging.getLogger("calcEmbeddings").setLevel(logging.WARNING)
         logging.getLogger("makeIndex").setLevel(logging.WARNING)
+    if args.no_faiss:
+        process_no_faiss(args)
+        return True
     if '*' in input_file:
         files = glob.glob(input_file)
     elif not os.path.exists(input_file):
@@ -127,40 +185,53 @@ def main():
         process(args,index=index,metadata=metadata)
         return True
     if args.encode_only and (folder or "*" in input_file):
+        print("Encoding files")
         files = glob.glob(input_file)
         files = [f for f in files if os.path.splitext(f)[1] in ['.conllu','.xml','.trs']]
         token_ext = ""
         if args.token_emb:
             token_ext = "_token"
         print("checking and encoding",len(files),"files")
+        cnt = 1
+        len_f = len(files)
         for f in files:
-            print("processing file",f)
+            print(f"processing file {cnt}/{len_f} {f}")
             print("------")
             base,ext = os.path.splitext(f)
             index_file = base+token_ext+'.faiss'
             metadata_file = base+'.json'
             embs_file = base+token_ext+'.npy'
-
-            if not os.path.exists(metadata_file) and not args.force:
-                print("metadata file not found",metadata_file)
+            print(embs_file)
+            if not os.path.exists(metadata_file) or args.force:
+                if args.force:
+                    print("force mode enabled")
+                else:
+                    print("metadata file not found",metadata_file)
                 _,metadata = parse_sentences(f)
                 save_metadata(metadata,base+".json")
             else:
                 print("Found metadata file",metadata_file)
-            if not os.path.exists(embs_file) and not args.force:
-                print("Embeddings file not found, regenerating",metadata_file)
+            if not os.path.exists(embs_file) or args.force:
+                if args.force:
+                    print("force mode enabled")
+                else:
+                    print("Embeddings file not found, regenerating",metadata_file)
                 embeddings, metadata = calcEmbeddings(collection_file_path=f, output_file_path=embs_file, mode=ext.replace('.','').strip(),
                                                reduce_precision=args.reduce_precision,overwrite=args.force,token_mode=args.token_emb)
             else:
                 print("Found embeddings file",embs_file)
-            if not os.path.exists(index_file) and not args.force:
-                print("Index file not found, building",index_file)
+            if not os.path.exists(index_file) or args.force:
+                if args.force:
+                    print("force mode enabled")
+                else:
+                    print("Index file not found, building",index_file)
                 index=makeIndex(embeddings=None, embedding_file_path=embs_file,
                                metric_type=faiss.METRIC_INNER_PRODUCT,
                                index_type=args.index_type, output_file_path=index_file)
             else:
                 print("Found index file",index_file)
             print("------")
+            cnt+=1
         return True
     if args.search_only and folder:
         query_vector = embedd_query(args.query)

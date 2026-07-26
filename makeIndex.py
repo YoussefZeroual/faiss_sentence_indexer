@@ -13,6 +13,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 def load_embeddings(embedding_file_path):
+    logger.info("Loading embeddings file %s",embedding_file_path)
     base,ext = os.path.splitext(embedding_file_path)
     embeddings = np.load(base+".npy")
     embeddings = np.ascontiguousarray(embeddings,dtype=np.float32)

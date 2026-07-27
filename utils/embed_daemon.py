@@ -30,7 +30,24 @@ model = None
 tokenizer = None
 token_model = None
 batch_queue: "queue.Queue" = queue.Queue()  # items: (sentences_list, result_queue)
+def all_but_the_top(X, n_components=3):
+    logger.info("applying 'All but the top' to embeddings:%s",X.shape)
+    import torch
+    import numpy as np
 
+    was_numpy = isinstance(X, np.ndarray)
+    if was_numpy:
+        X = torch.from_numpy(X)
+
+    X = X - X.mean(dim=0, keepdim=True)
+    n_samples, n_features = X.shape
+    q = min(n_components, n_samples, n_features)
+    if q > 0:
+        U, S, V = torch.pca_lowrank(X, q=q)
+        P = V[:, :q]
+        X = X - X @ P @ P.T
+
+    return X.numpy() if was_numpy else X
 def average_pool(last_hidden_states: Tensor,
                  attention_mask: Tensor) -> Tensor:
     last_hidden = last_hidden_states.masked_fill(~attention_mask[..., None].bool(), 0.0)

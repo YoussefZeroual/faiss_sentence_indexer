@@ -13,6 +13,7 @@ import os
 from makeIndex import load_embeddings
 from searchEmbedding import load_metadata,load_index
 from utils.embed_client import encode
+
 MISSING_SENTENCE = "[phrase manquante]"
 logging.basicConfig(
     level=logging.INFO,
@@ -266,8 +267,9 @@ def parse_sentences(file_path= None,mode = None):
         return None,None
     return sent_list,metadata
 
+#----encoding functions -----
 
-def calcEmbeddings(collection_file_path=None, output_file_path=None, mode="conllu",reduce_precision=False,overwrite=False,token_mode=False):
+def calcEmbeddings(collection_file_path=None, output_file_path=None, mode="conllu",reduce_precision=False,overwrite=False,token_mode=False,no_daemon=False):
     token_suffix=""
     if token_mode and "_token" not in output_file_path :
         token_suffix = "_token"
@@ -286,11 +288,11 @@ def calcEmbeddings(collection_file_path=None, output_file_path=None, mode="conll
     t0 = time.perf_counter()
     if token_mode:
         logger.info("using token level embedding mode")
-        embeddings = encode(sentence_list, chunk_size=100,token_mode=True)
+        embeddings = encode(sentence_list, chunk_size=100,token_mode=True,no_daemon=no_daemon)
         output_file_path = output_file_path.replace(".npy",token_suffix+".npy")
     else:
         logger.info("using sentence level embedding mode")
-        embeddings = encode(sentence_list, chunk_size=100)
+        embeddings = encode(sentence_list, chunk_size=100,no_daemon=no_daemon)
     t1 = time.perf_counter()
     procession_time = t1-t0
     logger.info("Embeddings created in %s seconds",np.round(procession_time,2))

@@ -4,6 +4,7 @@ import os
 import sys
 import glob
 import faiss
+import time
 import numpy as np
 
 from calcEmbeddings import calcEmbeddings, save_metadata, parse_sentences,encode_folder
@@ -19,6 +20,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 def process_no_faiss(args):
+    t0 = time.perf_counter()
     print("Using no faiss mode: calculating cosine sim directly on embeddings")
     print("-----------")
     results = []
@@ -27,19 +29,27 @@ def process_no_faiss(args):
         token_ext = "_token"
     if not args.no_faiss:
         return False
-    query_embs = embedd_query(query_str=args.query,token_mode=args.token_emb)
-    faiss.normalize_L2(query_embs)
+    query_embs = embedd_query(query_str=args.query,token_mode=args.token_emb,no_daemon=args.no_daemon)
     if args.folder or '*' in args.input_file:
         files = glob.glob(args.input_file)
         files = [f for f in files if os.path.splitext(f)[1] in ['.conllu','.xml','.trs']]
 
 
         len_f = len(files)
-        for f in files:
+        print(f"processing {len_f} files")
+        for i,f in enumerate(files):
+            #query_embs = embedd_query(query_str=args.query,token_mode=args.token_emb)
             base,ext = os.path.splitext(f)
+            print(f"Processing file {i}/{len_f}: {base+token_ext+'.npy'}")
             try:
                 embs = load_embeddings(base+token_ext+".npy")
+                #combined = np.vstack([embs,query_embs])
+                #from utils.embed_daemon import all_but_the_top
+                #combined = all_but_the_top(combined,2)
+                #embs = combined[len(embs):]
+                #query_embs = combined[:len(embs)]
                 faiss.normalize_L2(embs)
+                faiss.normalize_L2(query_embs)
             except FileNotFoundError as e:
                 print("File not found:",base+token_ext+".npy","skipping")
                 continue
@@ -55,8 +65,18 @@ def process_no_faiss(args):
             results.extend(zip([f]*len(result),metadata["sent_id"],metadata["raw_text"],result))
     else:
         base,ext = os.path.splitext(args.input_file)
-        embs = load_embeddings(base+token_ext+".npy")
-        faiss.normalize_L2(embs)
+        try:
+            embs = load_embeddings(base+token_ext+".npy")
+            #combined = np.vstack([embs,query_embs])
+            #from utils.embed_daemon import all_but_the_top
+            #combined = all_but_the_top(combined,5)
+            #embs = combined[:len(embs)]
+            #query_embs = combined[len(embs):]
+            faiss.normalize_L2(embs)
+            faiss.normalize_L2(query_embs)
+        except FileNotFoundError as e:
+            print(f"File not found {base+token_ext+".npy"}")
+            return False
         try:
             result = query_embs@embs.T
         except ValueError as e:
@@ -74,7 +94,9 @@ def process_no_faiss(args):
     print("Collection file                             | sent_id         | Sentence     | SImilarity score")
     for r in results[:args.top_k]:
         print(r[0],"|   ",r[1],"   ",r[2],"|   ",r[3])
-
+    t1 = time.perf_counter()
+    exec_time = np.round(t1-t0,3)
+    print(f"Execution time: {exec_time}s")
 def parse_args():
     parser = argparse.ArgumentParser(description="Semantic search over a corpus using FAISS.")
     parser.add_argument("input_file", help="Path to the corpus file (.conllu, .xml or .trs)")
@@ -95,13 +117,14 @@ def parse_args():
     parser.add_argument("--warn",action="store_true",help="enables log for warnings only")
     parser.add_argument("--token-emb",action="store_true",help="enables token level embedding mode instead of sentence embedding")
     parser.add_argument("--no-faiss",action="store_true",help="processes a query using models directly without FAISS indexation, for testing purpose")
+    parser.add_argument("--no-daemon",action="store_true",help="loads embedding models locally and use them instead of calling the daemon")
     return parser.parse_args()
 def process(args,index, metric_type=faiss.METRIC_INNER_PRODUCT, metadata=None):
     query_str=args.query
     top_k=args.top_k
     import time
     t0 = time.perf_counter()
-    result = search(query_str=args.query, index=index, metric_type=faiss.METRIC_INNER_PRODUCT, top_k=args.top_k, metadata=metadata,token_mode=args.token_emb)
+    result = search(query_str=args.query, index=index, metric_type=faiss.METRIC_INNER_PRODUCT, top_k=args.top_k, metadata=metadata,token_mode=args.token_emb,no_daemon=args.no_daemon)
     t1 = time.perf_counter()
     exec_time = t1 - t0
     print("Sent id               | Sentence    | similarity score")
@@ -133,21 +156,22 @@ def main():
     embeddings_missing = args.force or not os.path.exists(output_embeddings) or not os.path.exists(output_metadata)
     index_missing = args.force or (embeddings_missing) or (not os.path.exists(output_index))
     metadata_messing = not os.path.exists(output_metadata)
-
-
-
     if not args.log:
         logging.getLogger("searchEmbedding").setLevel(logging.ERROR)
         logging.getLogger("calcEmbeddings").setLevel(logging.ERROR)
         logging.getLogger("makeIndex").setLevel(logging.ERROR)
+        logging.getLogger("utils.embed_client").setLevel(logging.ERROR)
+
     if args.log:
         logging.getLogger("searchEmbedding").setLevel(logging.INFO)
         logging.getLogger("calcEmbeddings").setLevel(logging.INFO)
         logging.getLogger("makeIndex").setLevel(logging.INFO)
+        logging.getLogger("utils.embed_client").setLevel(logging.INFO)
     elif args.warn:
         logging.getLogger("searchEmbedding").setLevel(logging.WARNING)
         logging.getLogger("calcEmbeddings").setLevel(logging.WARNING)
         logging.getLogger("makeIndex").setLevel(logging.WARNING)
+        logging.getLogger("utils.embed_client").setLevel(logging.WARNING)
     if args.no_faiss:
         process_no_faiss(args)
         return True
@@ -217,7 +241,7 @@ def main():
                 else:
                     print("Embeddings file not found, regenerating",metadata_file)
                 embeddings, metadata = calcEmbeddings(collection_file_path=f, output_file_path=embs_file, mode=ext.replace('.','').strip(),
-                                               reduce_precision=args.reduce_precision,overwrite=args.force,token_mode=args.token_emb)
+                                               reduce_precision=args.reduce_precision,overwrite=args.force,token_mode=args.token_emb,no_daemon=args.no_daemon)
             else:
                 print("Found embeddings file",embs_file)
             if not os.path.exists(index_file) or args.force:
@@ -253,7 +277,7 @@ def main():
 
     elif (embeddings_missing and index_missing) or args.force:
         embeddings, metadata = calcEmbeddings(input_file, output_embeddings, mode,
-                                               reduce_precision=args.reduce_precision,overwrite=args.force,token_mode=args.token_emb)
+                                               reduce_precision=args.reduce_precision,overwrite=args.force,token_mode=args.token_emb,no_daemon=args.no_daemon)
         save_metadata(metadata, output_metadata)
         index=makeIndex(embeddings=embeddings, embedding_file_path=None,
                                metric_type=faiss.METRIC_INNER_PRODUCT,

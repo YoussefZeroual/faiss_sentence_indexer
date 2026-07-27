@@ -7,6 +7,7 @@ import uuid
 from multiprocessing.connection import Client, Listener
 import logging
 from utils.embed_daemon import average_pool,average_pool_last_n_layers
+import numpy as np
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -14,8 +15,11 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 DAEMON_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "embed_daemon.py")
-
-
+weights_loaded = False
+model = None
+token_model = None
+token_tokenizer=None
+device=None
 def _try_connect():
     try:
         return Client(("localhost", 6000))
@@ -38,29 +42,43 @@ def _start_daemon():
     raise RuntimeError("Embedding daemon failed to start")
 
 def encode_no_daemon(sentences=None,token_mode=False):
-    from torch import Tensor
-    from transformers import AutoTokenizer, AutoModel
-    import torch
-    import numpy as np
-    from sentence_transformers import SentenceTransformer
-    MODEL_NAME = "BAAI/bge-m3"
-    TOKEN_MODEL_NAME = 'intfloat/multilingual-e5-base'
+    global weights_loaded
+    global model
+    global token_model
+    global token_tokenizer
+    global device
+    if not weights_loaded:
+        from torch import Tensor
+        from transformers import AutoTokenizer, AutoModel
+        import torch
 
-    logger.info("Loading models...")
-    model = SentenceTransformer(MODEL_NAME)
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    model.to(device)
-    token_tokenizer = AutoTokenizer.from_pretrained(TOKEN_MODEL_NAME)
-    token_model = AutoModel.from_pretrained(TOKEN_MODEL_NAME)
+        from sentence_transformers import SentenceTransformer
+        MODEL_NAME = "BAAI/bge-m3"
+        TOKEN_MODEL_NAME = 'intfloat/multilingual-e5-base'
+
+        logger.info("Loading models...")
+        model = SentenceTransformer(MODEL_NAME)
+        device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        model.to(device)
+        token_tokenizer = AutoTokenizer.from_pretrained(TOKEN_MODEL_NAME)
+        token_model = AutoModel.from_pretrained(TOKEN_MODEL_NAME)
+        token_model.to(device)
+        weights_loaded = True
 
     if token_mode:
-        batch_dict = tokenizer(sentences, max_length=512, padding=True, truncation=True, return_tensors='pt')
-        batch_dict = {k: v.to(device) for k, v in batch_dict.items()}  # Move to GPU
-        outputs = token_model(**batch_dict, output_hidden_states=True)
-        vecs = average_pool_last_n_layers(outputs.hidden_states, batch_dict["attention_mask"], num_layers=4)
-        vecs = vecs.cpu().detach().numpy().astype(np.float32)
+        from tqdm import tqdm
+        batch_size = 32
+        vecs = []
+        for i in tqdm(range(0, len(sentences), batch_size)):
+            batch = sentences[i:i+batch_size]
+            batch_dict = token_tokenizer(batch, max_length=512, padding=True, truncation=True, return_tensors='pt')
+            batch_dict = {k: v.to(device) for k, v in batch_dict.items()}
+            outputs = token_model(**batch_dict, output_hidden_states=True)
+            vec = average_pool_last_n_layers(outputs.hidden_states, batch_dict["attention_mask"], num_layers=4)
+            vecs.append(vec.cpu().detach().numpy().astype(np.float32))
+        vecs = np.vstack(vecs)
     else:
-        vecs = model.encode(sentences).astype(np.float32)
+        vecs = model.encode(sentences,show_progress_bar=True).astype(np.float32)
 
     return vecs
 

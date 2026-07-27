@@ -5,19 +5,15 @@ import sys
 import threading
 import time
 from multiprocessing.connection import Listener
-import torch.nn.functional as F
-
-from torch import Tensor
-from transformers import AutoTokenizer, AutoModel
-import torch
 import numpy as np
-from sentence_transformers import SentenceTransformer
-
+torch_imported = False
 MODEL_NAME = "BAAI/bge-m3"
+TOKEN_MODEL_NAME ='intfloat/multilingual-e5-base'
 HOST, PORT = "localhost", 6000
-BACKLOG = 256           # pending TCP connections allowed to queue at OS level
-MAX_BATCH_SIZE = 256    # sentences per GPU encode() call
-BATCH_WINDOW_S = 0.015  # collect window before dispatching a batch (15ms)
+BACKLOG = 256
+MAX_BATCH_SIZE = 256
+BATCH_WINDOW_S = 0.015
+KEEP_MODEL_LOADED_TIMEOUT = 10 #seconds
 
 logging.basicConfig(
     level=logging.INFO,
@@ -29,6 +25,50 @@ logger = logging.getLogger("embed_daemon")
 model = None
 tokenizer = None
 token_model = None
+torch = None
+F = None
+Tensor = None
+AutoTokenizer = None
+AutoModel = None
+SentenceTransformer = None
+use_last_n_layers = False
+last_connection_time = 0
+
+
+def handle_timeout():
+    global last_connection_time
+    logger.info("Last connecttion time = %s",last_connection_time)
+    if last_connection_time == 0:
+        t0 = time.perf_counter()
+        last_connection_time +=t0
+        if last_connection_time>=KEEP_MODEL_LOADED_TIMEOUT:
+            model = None
+            token_model = None
+
+def load_models(token_mode=False):
+    global model
+    global tokenizer
+    global token_model
+    if (token_mode) and (token_model is None):
+        model = None
+        logger.info("Loading model %s",TOKEN_MODEL_NAME)
+        tokenizer = AutoTokenizer.from_pretrained(TOKEN_MODEL_NAME)
+        token_model = AutoModel.from_pretrained('intfloat/multilingual-e5-base')
+        token_model.to('cuda')
+    elif (not token_mode) and (model is None):
+        token_model = None
+        logger.info("Loading model %s",MODEL_NAME)
+        model = SentenceTransformer(MODEL_NAME)
+        model.to('cuda')
+        logger.info("Models loaded successfully")
+def _ensure_imports():
+    global torch, F, Tensor, AutoTokenizer, AutoModel, SentenceTransformer
+    if torch is None:
+        import torch
+        import torch.nn.functional as F
+        from torch import Tensor
+        from transformers import AutoTokenizer, AutoModel
+        from sentence_transformers import SentenceTransformer
 batch_queue: "queue.Queue" = queue.Queue()  # items: (sentences_list, result_queue)
 def all_but_the_top(X, n_components=3):
     logger.info("applying 'All but the top' to embeddings:%s",X.shape)
@@ -48,6 +88,8 @@ def all_but_the_top(X, n_components=3):
         X = X - X @ P @ P.T
 
     return X.numpy() if was_numpy else X
+
+
 def average_pool(last_hidden_states: Tensor,
                  attention_mask: Tensor) -> Tensor:
     last_hidden = last_hidden_states.masked_fill(~attention_mask[..., None].bool(), 0.0)
@@ -68,7 +110,7 @@ def batching_worker():
         sentences, result_q, token_mode = batch_queue.get()  # blocks for first item
         batch_items = [(sentences, result_q)]
         batch_sentences = list(sentences)
-
+        load_models(token_mode=token_mode)
         deadline = time.monotonic() + BATCH_WINDOW_S
         while len(batch_sentences) < MAX_BATCH_SIZE:
             timeout = deadline - time.monotonic()
@@ -84,12 +126,18 @@ def batching_worker():
         try:
             if token_mode:
                 batch_dict = tokenizer(batch_sentences, max_length=512, padding=True, truncation=True, return_tensors='pt')
-                batch_dict = {k: v.to('cuda') for k, v in batch_dict.items()}  # Move to GPU
-                outputs = token_model(**batch_dict, output_hidden_states=True)
-                vecs = average_pool_last_n_layers(outputs.hidden_states, batch_dict["attention_mask"], num_layers=4)
+                batch_dict = {k: v.to('cuda') for k, v in batch_dict.items()}
+                if use_last_n_layers:
+                    outputs = token_model(**batch_dict, output_hidden_states=True)
+                    vecs = average_pool_last_n_layers(outputs.hidden_states, batch_dict["attention_mask"], num_layers=4)
+                else:
+                    outputs = token_model(**batch_dict, output_hidden_states=False)
+                    vecs = average_pool(outputs.last_hidden_state, batch_dict['attention_mask'])
                 vecs = vecs.cpu().detach().numpy().astype(np.float32)
             else:
-                vecs = model.encode(batch_sentences).astype(np.float32)
+                vecs = model.encode(batch_sentences,batch_size=256).astype(np.float32)
+            torch.cuda.empty_cache()
+
         except Exception as e:
             logger.exception("Batch encode failed (%d sentences, %d jobs)",
                               len(batch_sentences), len(batch_items))
@@ -103,7 +151,7 @@ def batching_worker():
             rq.put(("ok", vecs[offset:offset + n]))
             offset += n
 
-
+    #time.sleep(1)
 def handle_client(conn):
     """One thread per connection. Pure I/O + queue handoff, no GPU work here."""
     job_id = None
@@ -132,7 +180,7 @@ def handle_client(conn):
         result = np.concatenate(all_vecs, axis=0)
         conn.send(("done", result))
         logger.info("Job %s: completed, sent %d embeddings", job_id, len(result))
-
+        all_vecs = None
     except Exception as e:
         logger.exception("Job %s: error", job_id)
         try:
@@ -155,19 +203,10 @@ def accept_loop(listener):
 
 
 def main():
-    global model
-    global tokenizer
-    global token_model
+
     logger.info("Daemon starting")
+    _ensure_imports()
 
-    logger.info("Loading models...")
-    model = SentenceTransformer(MODEL_NAME)
-    model.to('cuda')  # Move BGE-M3 to GPU
-
-    tokenizer = AutoTokenizer.from_pretrained('intfloat/multilingual-e5-base')
-    token_model = AutoModel.from_pretrained('intfloat/multilingual-e5-base')
-    token_model.to('cuda')  # Move e5-base to GPU
-    logger.info("Models loaded successfully")
 
     threading.Thread(target=batching_worker, daemon=True).start()
 

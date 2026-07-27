@@ -6,7 +6,6 @@ import glob
 import faiss
 import time
 import numpy as np
-
 from calcEmbeddings import calcEmbeddings, save_metadata, parse_sentences,encode_folder
 from makeIndex import makeIndex,makeIndex_folder,load_embeddings
 from utils.embed_client import encode
@@ -75,7 +74,7 @@ def process_no_faiss(args):
             faiss.normalize_L2(embs)
             faiss.normalize_L2(query_embs)
         except FileNotFoundError as e:
-            print(f"File not found {base+token_ext+".npy"}")
+            print(f"File not found {base+token_ext+'.npy'}")
             return False
         try:
             result = query_embs@embs.T
@@ -132,7 +131,7 @@ def process(args,index, metric_type=faiss.METRIC_INNER_PRODUCT, metadata=None):
         print(f"{r[0]} | {r[1]} |  {r[2]}")
     print("temps d'exécution de la requête Faiss:",np.round(exec_time,2))
 def process_folder(args,input_file):
-        query_vector = embedd_query(args.query,args.token_emb)
+        query_vector = embedd_query(args.query,args.token_emb,no_daemon=args.no_daemon)
         base, ext = os.path.splitext(input_file)
         if '*' in input_file:
             files = glob.glob(input_file)
@@ -140,7 +139,7 @@ def process_folder(args,input_file):
             files = glob.glob(base+"/"+"*faiss")
         print("Processing folder: searching similarity in",len(files),"index files")
         if args.force:
-            encode_folder(input_file,overwrite=True,token_mode=args.token_emb)
+            encode_folder(input_file,overwrite=True,token_mode=args.token_emb,no_daemon=args.no_daemon)
             makeIndex_folder(input_folder=input_file,metric_type=faiss.METRIC_INNER_PRODUCT,index_type="ivfpq",overwrite=True,token_mode= args.token_emb)
         print("------------")
         search_folder(input_file,query_vector=query_vector,metric_type=faiss.METRIC_INNER_PRODUCT,top_k=args.top_k,token_mode=args.token_emb)

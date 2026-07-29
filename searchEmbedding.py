@@ -32,7 +32,7 @@ def load_metadata(matadata_file_path=None):
         logger.warning("Couldn't load metadata")
         return None
 
-def embedd_query(query_str=None,token_mode=False,no_daemon=False):
+def embedd_query(query_str=None,token_mode=False,no_daemon=False,use_ollama=False,ollama_host='localhost',ollama_model=None):
     if token_mode:
         logger.info("Encoding query with token level mode")
     else:
@@ -43,9 +43,9 @@ def embedd_query(query_str=None,token_mode=False,no_daemon=False):
         logger.info("embedding query: %s",query_str)
         if token_mode:
             from utils.embed_daemon import all_but_the_top
-            embeddings = encode([query_str],chunk_size=1,token_mode=True,no_daemon=no_daemon)
+            embeddings = encode([query_str],chunk_size=1,token_mode=True,no_daemon=no_daemon,use_ollama=use_ollama,ollama_host=ollama_host,ollama_model=ollama_model)
         else:
-            embeddings = encode([query_str],chunk_size=1,no_daemon=no_daemon)
+            embeddings = encode([query_str],chunk_size=1,no_daemon=no_daemon,use_ollama=use_ollama,ollama_host=ollama_host,ollama_model=ollama_model)
         import numpy as np
         t1 = time.perf_counter()
         exec_time = t1-t0

@@ -80,6 +80,7 @@ def makeIndex_folder(input_folder=None,metric_type=None,index_type=None,overwrit
         file_list = [os.path.splitext(f)[0].replace("_token","")+emb_ext  for f in file_list]
     else:
         file_list = glob.glob(input_folder+"/*"+emb_ext)
+    file_list = list(set(file_list))
     len_f = len(file_list)
     logger.info("Found %s files in folder",len_f)
     for f in file_list:

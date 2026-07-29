@@ -269,7 +269,7 @@ def parse_sentences(file_path= None,mode = None):
 
 #----encoding functions -----
 
-def calcEmbeddings(collection_file_path=None, output_file_path=None, mode="conllu",reduce_precision=False,overwrite=False,token_mode=False,no_daemon=False):
+def calcEmbeddings(collection_file_path=None, output_file_path=None, mode="conllu",reduce_precision=False,overwrite=False,token_mode=False,no_daemon=False,use_ollama=False,ollama_host='localhost:11434',ollama_model=None):
     token_suffix=""
     if token_mode and "_token" not in output_file_path :
         token_suffix = "_token"
@@ -288,11 +288,11 @@ def calcEmbeddings(collection_file_path=None, output_file_path=None, mode="conll
     t0 = time.perf_counter()
     if token_mode:
         logger.info("using token level embedding mode")
-        embeddings = encode(sentence_list, chunk_size=64,token_mode=True,no_daemon=no_daemon)
+        embeddings = encode(sentence_list, chunk_size=64,token_mode=True,no_daemon=no_daemon,use_ollama=use_ollama,ollama_host=ollama_host,ollama_model=ollama_model)
         output_file_path = output_file_path.replace(".npy",token_suffix+".npy")
     else:
         logger.info("using sentence level embedding mode")
-        embeddings = encode(sentence_list, chunk_size=64,no_daemon=no_daemon)
+        embeddings = encode(sentence_list, chunk_size=64,no_daemon=no_daemon,use_ollama=use_ollama,ollama_host=ollama_host,ollama_model=ollama_model)
     t1 = time.perf_counter()
     procession_time = t1-t0
     logger.info("Embeddings created in %s seconds",np.round(procession_time,2))
@@ -309,7 +309,7 @@ def save_metadata(metadata,output_file=None,token_mode=False):
     with open(output_file,"w",encoding="utf-8") as f:
         json.dump(metadata,f)
 
-def encode_folder(input_folder=None,overwrite=False,token_mode=False,no_daemon=False):
+def encode_folder(input_folder=None,overwrite=False,token_mode=False,no_daemon=False,use_ollama=False,ollama_host='localhost:11434',ollama_model=None):
     extensions = [".conllu",".xml",".trs"]
     if '*' in input_folder:
         file_list = glob.glob(input_folder)
@@ -328,7 +328,7 @@ def encode_folder(input_folder=None,overwrite=False,token_mode=False,no_daemon=F
         logger.info("%s",f)
     for f,ext in zip(file_list,found_extentions):
         logger.info("Encoding file %s/%s filename=%s",cnt,len_f,f)
-        embeddings,metadata = calcEmbeddings(f,f.replace(ext,'npy'),ext,overwrite=overwrite,token_mode=token_mode,no_daemon=no_daemon)
+        embeddings,metadata = calcEmbeddings(f,f.replace(ext,'npy'),ext,overwrite=overwrite,token_mode=token_mode,no_daemon=no_daemon,use_ollama=use_ollama,ollama_host=ollama_host,ollama_model=ollama_model)
         save_metadata(metadata,f.replace(ext,"json"),token_mode=token_mode)
         cnt +=1
 if __name__ == "__main__":

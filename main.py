@@ -11,6 +11,8 @@ from makeIndex import makeIndex,makeIndex_folder,load_embeddings
 from utils.embed_client import encode
 from searchEmbedding import search, load_metadata, load_index, search_folder,embedd_query
 import logging
+OLLAMA_HOST = 'localhost:11434'
+OLLAMA_MODEL = 'snowflake-arctic-embed:22m'
 MODE_BY_EXT = {".conllu": "conllu", ".xml": "xml",".trs":"trs",".faiss":"faiss"}
 logging.basicConfig(
     level=logging.INFO,
@@ -117,6 +119,7 @@ def parse_args():
     parser.add_argument("--token-emb",action="store_true",help="enables token level embedding mode instead of sentence embedding")
     parser.add_argument("--no-faiss",action="store_true",help="processes a query using models directly without FAISS indexation, for testing purpose")
     parser.add_argument("--no-daemon",action="store_true",help="loads embedding models locally and use them instead of calling the daemon")
+    parser.add_argument("--use-ollama",action="store_true",help="Use ollama for embeddings")
     return parser.parse_args()
 def process(args,index, metric_type=faiss.METRIC_INNER_PRODUCT, metadata=None):
     query_str=args.query
@@ -131,15 +134,16 @@ def process(args,index, metric_type=faiss.METRIC_INNER_PRODUCT, metadata=None):
         print(f"{r[0]} | {r[1]} |  {r[2]}")
     print("temps d'exécution de la requête Faiss:",np.round(exec_time,2))
 def process_folder(args,input_file):
-        query_vector = embedd_query(args.query,args.token_emb,no_daemon=args.no_daemon)
+        query_vector = embedd_query(args.query,args.token_emb,no_daemon=args.no_daemon,use_ollama=args.use_ollama,ollama_host=OLLAMA_HOST,ollama_model=OLLAMA_MODEL)
         base, ext = os.path.splitext(input_file)
         if '*' in input_file:
             files = glob.glob(input_file)
         else:
             files = glob.glob(base+"/"+"*faiss")
+        files = [f for f in files if os.path.splitext(f)[1] in ['.faiss']]
         print("Processing folder: searching similarity in",len(files),"index files")
         if args.force:
-            encode_folder(input_file,overwrite=True,token_mode=args.token_emb,no_daemon=args.no_daemon)
+            encode_folder(input_file,overwrite=True,token_mode=args.token_emb,no_daemon=args.no_daemon,use_ollama=args.use_ollama,ollama_host=OLLAMA_HOST,ollama_model=OLLAMA_MODEL)
             makeIndex_folder(input_folder=input_file,metric_type=faiss.METRIC_INNER_PRODUCT,index_type="ivfpq",overwrite=True,token_mode= args.token_emb)
         print("------------")
         search_folder(input_file,query_vector=query_vector,metric_type=faiss.METRIC_INNER_PRODUCT,top_k=args.top_k,token_mode=args.token_emb)

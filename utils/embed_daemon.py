@@ -14,7 +14,7 @@ BACKLOG = 256
 MAX_BATCH_SIZE = 256
 BATCH_WINDOW_S = 0.015
 KEEP_MODEL_LOADED_TIMEOUT = 10 #seconds
-
+device = 'None'
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -49,20 +49,23 @@ def load_models(token_mode=False):
     global model
     global tokenizer
     global token_model
+    global device
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    print("device is ",device)
     if (token_mode) and (token_model is None):
         model = None
         logger.info("Loading model %s",TOKEN_MODEL_NAME)
         tokenizer = AutoTokenizer.from_pretrained(TOKEN_MODEL_NAME)
         token_model = AutoModel.from_pretrained('intfloat/multilingual-e5-base')
-        token_model.to('cuda')
+        token_model.to(device)
     elif (not token_mode) and (model is None):
         token_model = None
         logger.info("Loading model %s",MODEL_NAME)
         model = SentenceTransformer(MODEL_NAME)
-        model.to('cuda')
+        model.to(device)
         logger.info("Models loaded successfully")
 def _ensure_imports():
-    global torch, F, Tensor, AutoTokenizer, AutoModel, SentenceTransformer
+    global torch, F, Tensor, AutoTokenizer, AutoModel, SentenceTransformer,device
     if torch is None:
         import torch
         import torch.nn.functional as F
@@ -126,7 +129,7 @@ def batching_worker():
         try:
             if token_mode:
                 batch_dict = tokenizer(batch_sentences, max_length=512, padding=True, truncation=True, return_tensors='pt')
-                batch_dict = {k: v.to('cuda') for k, v in batch_dict.items()}
+                batch_dict = {k: v.to(device) for k, v in batch_dict.items()}
                 if use_last_n_layers:
                     outputs = token_model(**batch_dict, output_hidden_states=True)
                     vecs = average_pool_last_n_layers(outputs.hidden_states, batch_dict["attention_mask"], num_layers=4)
@@ -136,7 +139,8 @@ def batching_worker():
                 vecs = vecs.cpu().detach().numpy().astype(np.float32)
             else:
                 vecs = model.encode(batch_sentences,batch_size=256).astype(np.float32)
-            torch.cuda.empty_cache()
+            if device == 'cuda':
+                torch.cuda.empty_cache()
 
         except Exception as e:
             logger.exception("Batch encode failed (%d sentences, %d jobs)",
@@ -203,7 +207,6 @@ def accept_loop(listener):
 
 
 def main():
-
     logger.info("Daemon starting")
     _ensure_imports()
 

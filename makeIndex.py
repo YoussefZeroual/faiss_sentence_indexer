@@ -52,7 +52,7 @@ def load_embeddings(embedding_file_path):
     # le produit scalaire appliqué à des vecteurs normalisés L2 est l'équivalent d'une similarité cosinus, c'est la métrique la plus utilisée en recherche sémantique.
     faiss.normalize_L2(embeddings)
     return embeddings
-def makeIndex(embeddings=None,embedding_file_path=None,metric_type=None,index_type=None,output_file_path=None,overwrite=False,token_mode=False):
+def makeIndex(embeddings=None,embedding_file_path=None,metric_type=None,index_type=None,m=256,output_file_path=None,overwrite=False,token_mode=False):
     """
     Construit, entraîne et sauvegarde un index FAISS à partir de vecteurs d'embeddings.
 
@@ -61,6 +61,7 @@ def makeIndex(embeddings=None,embedding_file_path=None,metric_type=None,index_ty
         embedding_file_path (str): Chemin vers le fichier d'embeddings à charger si l'objet embeddings n'est pas fourni.
         metric_type (int): Type de métrique de distance FAISS (ex: faiss.METRIC_INNER_PRODUCT).
         index_type (str): L'algorithme d'indexation cible ('flat', 'hnsw', ou 'ivfpq').
+        m (int): # Nombre de sous-vecteurs pour la compression (PQ), ce paramètre a un impact direct sur la précision des résultats des requpetes: en testant avec m = 8, les résultats étaient modests, augmenté à 64,128 et 256 les résultats se sont approchés de ceux d'un index flat (sans compression). Il faut cependant noter que plus cette valeur est élevé plus la taille de l'index est grande (ex. pour un corpus de ~28M tokens et m=256, la taille de l'index ivfpq = 35MB, pour un index flat du même corpus, la taille est plus de 460 MB ). Meilleure valeur testée jusqu'à présent = 512
         output_file_path (str): Chemin de destination pour sauvegarder le fichier d'index.
         overwrite (bool): Si False, charge l'index existant s'il est déjà présent sur le disque.
         token_mode (bool): Si True, ajuste le nom du fichier de sortie pour refléter l'encodage par token.
@@ -105,7 +106,7 @@ def makeIndex(embeddings=None,embedding_file_path=None,metric_type=None,index_ty
         # Index IVFPQ (Partitionnement + Quantification) : Optimise l'utilisation de la RAM pour les très grands corpus, optimise très considérablement la taille du fichier index
     elif index_type == "ivfpq":
         nlist = 4 * int(np.sqrt(n))    # Nombre de clusters (cellules de Voronoï)
-        m = 8                          # Nombre de sous-vecteurs pour la compression (PQ)
+        m = m                          # Nombre de sous-vecteurs pour la compression (PQ), ce paramètre a un impact direct sur la précision des résultats des requpetes: en testant avec m = 8, les résultats étaient modests, augmenté à 64,128 et 256 les résultats se sont approchés de ceux d'un index flat (sans compression). Il faut cependant noter que plus cette valeur est élevé plus la taille de l'index est grande.
         nbits = 8                      # Bits alloués par sous-vecteur (2^8 = 256 centroïdes)
 
 

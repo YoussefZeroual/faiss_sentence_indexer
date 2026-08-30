@@ -151,8 +151,9 @@ def search(query_vector=None,query_str=None, index=None, metric_type=None, top_k
     # Normalisation L2 du vecteur de requête, essentielle pour que le inner product soit équivalent à une similarité cosinus
     faiss.normalize_L2(query_vector)
     # Ajustement du paramètre nprobe pour certains types d'index (index partitionnés comme IVF qui divise l'espace vectoriel en régions) afin d'améliorer la précision de la recherche
+    logger.debug("has nprobe attr:%s", hasattr(index, "nprobe"))
     if hasattr(index, "nprobe"):
-        index.nprobe = 8
+        index.nprobe = 64
     try:
         # Lancement de la recherche FAISS pour extraire les k plus proches voisins (distances et indices)
         distances, indices = index.search(query_vector, top_k)

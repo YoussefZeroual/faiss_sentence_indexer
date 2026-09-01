@@ -201,7 +201,7 @@ def parse_args():
 
     # Paramètres de l'index FAISS et de la recherche
     parser.add_argument("--index-type", choices=["flat", "hnsw", "ivfpq"], default="ivfpq",
-                         help="FAISS index type (default: flat)")
+                         help="FAISS index type (default: ivfpq)")
     parser.add_argument("--top-k", type=int, default=10, help="Number of results to return (default: 10)")
 
     # Optimisations et forçage

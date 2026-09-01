@@ -355,7 +355,7 @@ def parse_sentence_trs(file_path=None):
         metadata["tokens"].append(get_tokens(raw_text))
         sent_list.append(raw_text)
     return sent_list,metadata
-def parse_sentences(file_path= None,mode = None):
+def parse_sentences(file_path=None,mode=None):
     """
     Sélectionne et exécute le mode de parsing approprié en fonction de l'extension du fichier.
 
@@ -372,9 +372,10 @@ def parse_sentences(file_path= None,mode = None):
             - sent_list (list): Liste des phrases ou tours de parole extraits.
             - metadata (dict): Dictionnaire des métadonnées correspondantes.
     """
-    # Extraction de l'extension du fichier pour déterminer automatiquement le mode de parsing
-    base,ext = os.path.splitext(file_path)
-    mode = ext.replace(".","")
+    # Extraction de l'extension du fichier pour déterminer automatiquement le mode de parsing s'il n'est pas déterminé dans l'appel de la fonction
+    if mode is None:
+        base,ext = os.path.splitext(file_path)
+        mode = ext.replace(".","")
     # Routage pour le format CoNLLU
     if mode == "conllu":
         t0 = time.perf_counter()
@@ -422,7 +423,7 @@ def parse_sentences(file_path= None,mode = None):
 
 #----encoding functions -----
 
-def calcEmbeddings(collection_file_path=None, output_file_path=None, mode="conllu",reduce_precision=False,overwrite=False,token_mode=False,no_daemon=False,use_ollama=False,ollama_host='localhost:11434',ollama_model=None):
+def calcEmbeddings(collection_file_path=None, output_file_path=None, mode=None,reduce_precision=False,overwrite=False,token_mode=False,no_daemon=False,use_ollama=False,ollama_host='localhost:11434',ollama_model=None):
     """
     Fonction principale du script: elle permet d'extraire les phrases d'un fichier de corpus et génère leurs embeddings correspondants.
     Intègre un système de cache : si les fichiers de sortie existent déjà, ils sont chargés directement.

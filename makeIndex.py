@@ -52,7 +52,7 @@ def load_embeddings(embedding_file_path):
     # le produit scalaire appliqué à des vecteurs normalisés L2 est l'équivalent d'une similarité cosinus, c'est la métrique la plus utilisée en recherche sémantique.
     faiss.normalize_L2(embeddings)
     return embeddings
-def makeIndex(embeddings=None,embedding_file_path=None,metric_type=None,index_type=None,m=256,output_file_path=None,overwrite=False,token_mode=False):
+def makeIndex(embeddings=None,embedding_file_path=None,metric_type=None,index_type=None,m=512,output_file_path=None,overwrite=False,token_mode=False):
     """
     Construit, entraîne et sauvegarde un index FAISS à partir de vecteurs d'embeddings.
 
@@ -144,7 +144,7 @@ def makeIndex(embeddings=None,embedding_file_path=None,metric_type=None,index_ty
 
 
     return index
-def makeIndex_folder(input_folder=None,metric_type=None,index_type=None,overwrite=False,token_mode=False):
+def makeIndex_folder(input_folder=None,metric_type=None,index_type=None,m=512,overwrite=False,token_mode=False):
     """
     Parcourt un dossier (ou un wildcard ex. *Camus*) pour trouver des fichiers d'embeddings
     et crée un index FAISS pour chacun d'eux.
@@ -186,7 +186,7 @@ def makeIndex_folder(input_folder=None,metric_type=None,index_type=None,overwrit
         # Définition du chemin de sortie pour le fichier d'index
         output_file_path = base+".faiss"
         # Appel de la fonction makeIndex pour traiter ce fichier spécifique
-        index = makeIndex(embedding_file_path=f,metric_type=metric_type,index_type=index_type,output_file_path=output_file_path,overwrite=overwrite)
+        index = makeIndex(embedding_file_path=f,metric_type=metric_type,index_type=index_type,m=m,output_file_path=output_file_path,overwrite=overwrite)
 
 
 if __name__ == "__main__":

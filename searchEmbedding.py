@@ -253,21 +253,4 @@ def search_folder(input_folder=None,query_str=None,query_vector=None,metric_type
         print("index file                | Sent id               | Sentence    | similarity score")
         for r in results:
             print(f"{r[0]} | {r[1]} | {r[2]} | {r[3]}")
-# fonction main pouvant être exécutée pour tester le fonctionnement du script
-if __name__ == "__main__":
-    import sys
-    metric_type = faiss.METRIC_INNER_PRODUCT
-    top_k = 10
-    query_str = sys.argv[1]
-    index = faiss.read_index("index.faiss")
-    logger.info("Loaded index from %s","index.faiss")
-    print("ntotal:", index.ntotal)
-    print("dimension:", index.d)
-    matches = search(query_str=query_str,
-        index=index,
-        metric_type=faiss.METRIC_INNER_PRODUCT,
-        top_k=top_k,
-        metadata_file_path= "metadata.json"
-        )
 
-    print(matches)

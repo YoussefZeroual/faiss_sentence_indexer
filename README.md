@@ -456,7 +456,7 @@ Module de création d'index FAISS pour la recherche sémantique. Il fait le pont
 embeddings = load_embeddings("corpus.npy")
 ```
 
-#### `makeIndex(embeddings=None, embedding_file_path=None, metric_type=None, index_type=None, m=256, output_file_path=None, overwrite=False, token_mode=False)`
+#### `makeIndex(embeddings=None, embedding_file_path=None, metric_type=None, index_type=None, m=512, output_file_path=None, overwrite=False, token_mode=False)`
 
 **Description** — Construit, entraîne et sauvegarde un index FAISS à partir de vecteurs d'embeddings.
 
@@ -1164,7 +1164,7 @@ Cette section récapitule les décisions structurantes du projet et les raisons 
 - **Chargement fainéant des modèles** (phrase vs token) : chaque modèle n'est chargé que lorsqu'il est demandé par le client ; une fois chargé, il est gardé en mémoire pour traiter les requêtes futures. Cela permet d'économiser de la VRAM.
 - **Libération explicite du cache CUDA après chaque lot** : réponse directe à des fuites de mémoire GPU constatées lors de l'encodage de plusieurs corpus consécutifs.
 - **Normalisation L2 systématique et symétrique** (côté indexation *et* côté requête) : condition nécessaire pour que la métrique `METRIC_INNER_PRODUCT` de FAISS soit mathématiquement équivalente à une similarité cosinus.
-- **Valeur par défaut de `m=256` pour `ivfpq`** (paramètre exposé dans `makeIndex()`) : choix directement issu de tests comparatifs contre une recherche exacte, qui ont montré que `nprobe` n'avait aucun impact mesurable sur la qualité des résultats, alors que `m` en avait un très net — voir [Tests](#tests--impact-de-nprobe-et-de-m).
+- **Valeur par défaut de `m=256` pour `ivfpq`** (paramètre exposé dans `makeIndex()` et `makeIndex_folder()`) : choix directement issu de tests comparatifs contre une recherche exacte, qui ont montré que `nprobe` n'avait aucun impact mesurable sur la qualité des résultats, alors que `m` en avait un très net — voir [Tests](#tests--impact-de-nprobe-et-de-m).
 - **Bascule automatique IVFPQ → flat** lorsque le corpus est trop petit pour un entraînement statistiquement fiable : évite de construire silencieusement un index de mauvaise qualité, au prix d'un avertissement explicite dans les logs.
 - **Vérification d'intégrité index/métadonnées** (`index.ntotal == len(metadata)`) avant toute recherche : détecte les désynchronisations entre fichiers dérivés générés à des moments différents.
 - **Cache incrémental à trois niveaux** (embeddings → métadonnées → index) : évite de recalculer des embeddings coûteux en GPU/CPU si seule l'étape d'indexation ou de reconstruction des métadonnées doit être rejouée.

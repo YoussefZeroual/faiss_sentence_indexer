@@ -1551,7 +1551,7 @@ python main.py corpus/Camus.conllu "pas de souci" --force
 ### 7. Valider les résultats et tester des variantes
 
 ```bash
-# Comparer FAISS à un calcul exact : produit scalaire direct sur les .npy, sans index
+# Comparer FAISS à un calcul exact : produit scalaire direct sur les .npy, sans index (disponible uniquement en mode phrase)
 python main.py corpus/Camus.conllu "pas de souci" --no-faiss --top-k 30
 python main.py corpus/Camus.conllu "pas de souci" --top-k 30           # à comparer avec la commande précédente
 python main.py "corpus/*" "pas de souci" --no-faiss --top-k 30         # plusieurs fichiers (wildcard, pas de nom de dossier seul)

@@ -21,7 +21,8 @@ import numpy as np
 from calcEmbeddings import calcEmbeddings, save_metadata, parse_sentences,encode_folder,fix_punctuation_spaces
 from makeIndex import makeIndex,makeIndex_folder,load_embeddings
 from utils.embed_client import encode
-from searchEmbedding import search, load_metadata, load_index, search_folder,embedd_query,load_lemma_index,apply_abtt,abtt_path_from_index
+from searchEmbedding import (search, load_metadata, load_index, search_folder, embedd_query,
+                             load_lemma_index, apply_abtt, abtt_path_from_index, save_results_csv)
 import logging
 
 # serveur Ollama par défaut
@@ -257,6 +258,11 @@ def parse_args():
     parser.add_argument("--allow-no-abtt",action="store_true",
                          help="token mode only: allow searching without the corpus '_abtt.json' file (testing/A-B comparison). "
                               "Results are wrong if the index was built WITH ABTT")
+    parser.add_argument("--output-csv", default=None,
+                    help="Save search results to this CSV file")
+    parser.add_argument("--max-token-ids-occ", type=int, default=8,
+                    help="token mode: max number of tokens (sent_id) displayed per lemma (0 = all, default: 8)")
+
     args = parser.parse_args()
     # la requête n'est obligatoire que si on lance une recherche
     if args.query is None and not args.encode_only and not args.regenerate_metadata:
@@ -292,14 +298,22 @@ def process(args,index, metric_type=faiss.METRIC_INNER_PRODUCT, metadata=None,le
 
     # Affichage des résultats dans la console
     if args.token_emb:
-        print("lemma          | similarity score")
-        for r in result:
-            print(f"{r[0]} |  {r[1]}")
+        max_occ = args.max_token_ids_occ if args.max_token_ids_occ > 0 else None
+        print("lemma          | similarity score | tokens (sent_id)")
+        for lemma, score, occ in result:
+            shown_occ = occ if max_occ is None else occ[:max_occ]
+            shown = ", ".join(f"{tok} ({sid})" for tok, sid in shown_occ)
+            if len(shown_occ) < len(occ):
+                shown += f", ... (+{len(occ) - len(shown_occ)})"
+            print(f"{lemma} |  {score} | {shown}")
     else:
         print("Sent id               | Sentence    | similarity score")
         for r in result:
             print(f"{r[0]} | {r[1]} |  {r[2]}")
-    print("temps d'exécution de la requête Faiss:",np.round(exec_time,2))
+
+    if args.output_csv:
+        rows = [(args.input_file, *r) for r in result]
+        save_results_csv(rows, args.output_csv, token_mode=args.token_emb)
 def process_folder(args,input_file):
     """
     Exécute une recherche sémantique sur un répertoire entier ou un lot de fichiers (via un wildcard).
@@ -330,7 +344,7 @@ def process_folder(args,input_file):
         makeIndex_folder(input_folder=input_file,metric_type=faiss.METRIC_INNER_PRODUCT,index_type=args.index_type,overwrite=True,token_mode= args.token_emb)
     print("------------")
         # 4. Lancement de la recherche globale sur le répertoire avec le vecteur pré-calculé
-    search_folder(input_file,query_vector=query_vector,metric_type=faiss.METRIC_INNER_PRODUCT,top_k=args.top_k,token_mode=args.token_emb,verbose=True,allow_no_abtt=args.allow_no_abtt or args.no_abtt)
+    search_folder(input_file,query_vector=query_vector,metric_type=faiss.METRIC_INNER_PRODUCT,top_k=args.top_k,token_mode=args.token_emb,verbose=True,allow_no_abtt=args.allow_no_abtt or args.no_abtt,max_token_ids_occ=args.max_token_ids_occ,output_csv=args.output_csv)
 def main():
     """
     Point d'entrée principal du script CLI.

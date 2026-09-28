@@ -11,6 +11,7 @@ import numpy as np
 import json
 import logging
 import os
+import pandas as pd
 # configuration du journal pour l'affichage des message et des avertissements
 logging.basicConfig(
     level=logging.INFO,
@@ -259,9 +260,26 @@ def load_lemma_index(lemma_index_path=None):
 
 
 
+def save_results_csv(results, output_csv, token_mode=False):
+    """
+    Mode phrase : une ligne par résultat (index_file, sent_id, sentence, score).
+    Mode token  : une ligne par occurrence (index_file, lemma, score, token, sent_id).
+    """
+    if token_mode:
+        rows = [(f, lemma, score, tok, sid)
+                for f, lemma, score, occ in results
+                for tok, sid in (occ or [(None, None)])]  # lemme sans occurrence -> 1 ligne vide
+        df = pd.DataFrame(rows, columns=["index_file", "lemma", "score", "token", "sent_id"])
+    else:
+        df = pd.DataFrame(results, columns=["index_file", "sent_id", "sentence", "score"])
+
+    # utf-8-sig : Excel reconnaît correctement l'UTF-8 (arabe, accents)
+    df.to_csv(output_csv, index=False, encoding="utf-8-sig")
+    logger.info("Results saved to %s", output_csv)
+
 def search_folder(input_folder=None, query_str=None, query_vector=None,
                   metric_type=faiss.METRIC_INNER_PRODUCT, top_k=10, verbose=True,
-                  token_mode=False, no_daemon=False, allow_no_abtt=False,max_token_ids_occ=8):
+                  token_mode=False, no_daemon=False, allow_no_abtt=False,max_token_ids_occ=8,output_csv=None):
     """
     Exécute une recherche de similarité sur un ensemble d'index FAISS contenus dans un dossier.
 
@@ -278,8 +296,9 @@ def search_folder(input_folder=None, query_str=None, query_vector=None,
         allow_no_abtt (bool): Si True, les corpus sans fichier '_abtt.json' ne sont plus
             ignorés : la recherche se fait sans ABTT (tests uniquement).
         max_token_ids_occ: nombre max de tokens et sent_ids à afficher par lemme (mode token)
+        output_csv: csv file to save results
     Valeurs retournées:
-        None: agrège et affiche les résultats.
+        Results in a pandas df
     """
 
     import time
@@ -364,9 +383,11 @@ def search_folder(input_folder=None, query_str=None, query_vector=None,
         logger.warning("Some index files were skipped because file or corresponding metadata files were not found")
     if results == []:
         logger.warning("Search query didn't return any results, input file list probaby empty")
+    if output_csv is not None:
+        save_results_csv(results, output_csv, token_mode=token_mode)
     if verbose:
         if token_mode:
-            max_occ = max_token_ids_occ  # nombre max d'occurrences affichées par lemme
+            max_occ = max_token_ids_occ if max_token_ids_occ and max_token_ids_occ > 0 else None  # nombre max d'occurrences affichées par lemme
             print("index file                | lemma       | similarity score | tokens (sent_id)")
             for r in results:
                 occ = r[3]
@@ -378,3 +399,4 @@ def search_folder(input_folder=None, query_str=None, query_vector=None,
             print("index file                | Sent id               | Sentence    | similarity score")
             for r in results:
                 print(f"{r[0]} | {r[1]} | {r[2]} | {r[3]}")
+    return results

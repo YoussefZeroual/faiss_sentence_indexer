@@ -3,3 +3,5 @@ faiss-gpu
 sentence-transformers
 conllu
 lxml
+pandas
+simplemma

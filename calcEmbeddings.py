@@ -476,7 +476,7 @@ def parse_sentences(file_path=None,mode=None):
 
 #----encoding functions -----
 
-def calcEmbeddings(collection_file_path=None, output_file_path=None, mode=None,reduce_precision=False,overwrite=False,token_mode=False,no_daemon=False,use_ollama=False,ollama_host='localhost:11434',ollama_model=None):
+def calcEmbeddings(collection_file_path=None, output_file_path=None, mode=None,reduce_precision=False,overwrite=False,token_mode=False,no_daemon=False,use_ollama=False,ollama_host='localhost:11434',ollama_model=None,apply_abtt=True):
     """
     Fonction principale du script: elle permet d'extraire les phrases d'un fichier de corpus et génère leurs embeddings correspondants.
     Intègre un système de cache : si les fichiers de sortie existent déjà, ils sont chargés directement.
@@ -515,6 +515,8 @@ def calcEmbeddings(collection_file_path=None, output_file_path=None, mode=None,r
     if token_mode:
         # en mode token, la matrice .npy est inutilisable sans son index de lemmes
         cache_ok = cache_ok and os.path.exists(lemma_index_file)
+        abtt_exists = os.path.exists(effective_output_path.replace(".npy", "_abtt.json"))
+        cache_ok = cache_ok and (abtt_exists == apply_abtt)
     if (not overwrite) and cache_ok:
         logger.warning("embedding file and metadata file already exist, loading from %s and %s",effective_output_path,base+".json")
         embeddings = load_embeddings(effective_output_path)
@@ -547,12 +549,22 @@ def calcEmbeddings(collection_file_path=None, output_file_path=None, mode=None,r
             embeddings, metadata["lemmas"]
         )
         # on applique all_but_the_top aux embeddings (elle est plutôt appliquée ici au lieu d'être directement appliquée aux embeddings des lemmes individuels vu la quantité exponentielle de mémoire que cela nécessiterait)
-        lemma_embeddings, mu, P = all_but_the_top(lemma_embeddings, n_components=3)
-        # on enregistre les paramètres de la fonction all_but_the_top par corpus pour permettre de les applquer à la requête lors de la recherche sémantique: obligatoire pour que la requête se trouve dans le même espace que les embeddings du corpus
         abtt_path = effective_output_path.replace(".npy", "_abtt.json")
-        with open(abtt_path, "w", encoding="utf-8") as f:
-            json.dump({"mean": mu.tolist(), "components": P.tolist()}, f)
-            embeddings = lemma_embeddings
+        if apply_abtt:
+             # on enregistre les paramètres de la fonction all_but_the_top par corpus pour permettre de les applquer à la requête lors de la recherche sémantique: obligatoire pour que la requête se trouve dans le même espace que les embeddings du corpus
+
+            lemma_embeddings, mu, P = all_but_the_top(lemma_embeddings, n_components=3)
+            with open(abtt_path, "w", encoding="utf-8") as f:
+                json.dump({"mean": mu.tolist(), "components": P.tolist()}, f)
+            logger.info("ABTT enabled (apply_abtt=True):%s written", abtt_path)
+        else:
+            logger.warning("ABTT disabled (apply_abtt=False): no %s written", abtt_path)
+            if os.path.exists(abtt_path):
+                os.remove(abtt_path)
+        embeddings = lemma_embeddings
+
+
+
         # permet de réduire la taille du fichier embeddings par un facteur de 2x si activé, en réduisant la précision
         if reduce_precision:
             embeddings = embeddings.astype(np.float16)
@@ -582,26 +594,10 @@ def calcEmbeddings(collection_file_path=None, output_file_path=None, mode=None,r
     t1 = time.perf_counter()
     procession_time = t1-t0
     logger.info("Embeddings created in %s seconds",np.round(procession_time,2))
-    logger.info("saving embeddings to %s", output_file_path.replace("_token_token","_token"))
-    if token_mode:
-        # embeddings est désormais une matrice uniforme (n_lemmes_uniques, hidden_dim)
-        # -> sauvegarde directe, plus besoin de tableau 'object'/allow_pickle
-        if reduce_precision:
-            embeddings = embeddings.astype(np.float16)
-        np.save(output_file_path, embeddings)
-        # Sauvegarde de la liste ordonnée des lemmes (index ligne -> lemme)
-        lemma_index_path = output_file_path.replace(".npy", "_lemma_index.json")
-        with open(lemma_index_path, "w", encoding="utf-8") as f:
-            json.dump(lemma_list, f, ensure_ascii=False)
-        logger.info("lemma index saved to %s", lemma_index_path)
-    else:
-        if reduce_precision:
-            np.save(output_file_path,embeddings.astype(np.float16))
-        else:
-            np.save(output_file_path,embeddings)
-    logger.info("saved successfully")
 
     return embeddings,metadata
+
+
 def save_metadata(metadata,output_file=None,token_mode=False):
     """
     Sauvegarde le dictionnaire de métadonnées dans un fichier JSON.
@@ -651,7 +647,7 @@ def build_lemma_embeddings(embeddings, lemmas_per_sentence):
     lemma_list = sorted(groups.keys())
     lemma_embeddings = np.stack([np.mean(groups[l], axis=0) for l in lemma_list]).astype(np.float32)
     return lemma_list, lemma_embeddings
-def encode_folder(input_folder=None,overwrite=False,token_mode=False,no_daemon=False,use_ollama=False,ollama_host='localhost:11434',ollama_model=None):
+def encode_folder(input_folder=None,overwrite=False,token_mode=False,no_daemon=False,use_ollama=False,ollama_host='localhost:11434',ollama_model=None,apply_abtt=True):
     """
     Parcourt un répertoire ou un wildcard (ex. *Camus*) pour traiter en lot des fichiers de corpus,
     générer leurs embeddings et sauvegarder leurs métadonnées.
@@ -694,7 +690,7 @@ def encode_folder(input_folder=None,overwrite=False,token_mode=False,no_daemon=F
             logger.info("Encoding file %s/%s filename=%s",cnt,len_f,f)
             # splitext ne touche que l'extension finale (f.replace(ext,...) remplaçait toutes les occurrences dans le chemin)
             base = os.path.splitext(f)[0]
-            embeddings,metadata = calcEmbeddings(f,base+".npy",ext,overwrite=overwrite,token_mode=token_mode,no_daemon=no_daemon,use_ollama=use_ollama,ollama_host=ollama_host,ollama_model=ollama_model)
+            embeddings,metadata = calcEmbeddings(f,base+".npy",ext,overwrite=overwrite,token_mode=token_mode,no_daemon=no_daemon,use_ollama=use_ollama,ollama_host=ollama_host,ollama_model=ollama_model,apply_abtt=apply_abtt)
             # Sauvegarde synchronisée des métadonnées associées en format JSON
             save_metadata(metadata,base+".json",token_mode=token_mode)
             cnt +=1

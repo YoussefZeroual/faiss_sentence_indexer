@@ -253,6 +253,7 @@ def parse_args():
     parser.add_argument("--no-faiss",action="store_true",help="processes a query using models directly without FAISS indexation, for testing purpose")
     parser.add_argument("--no-daemon",action="store_true",help="loads embedding models locally and use them instead of calling the daemon")
     parser.add_argument("--use-ollama",action="store_true",help="Use ollama for embeddings")
+    parser.add_argument("--no-abtt",action="store_true",help="token mode only: build embeddings WITHOUT all_but_the_top (no '_abtt.json' written)")
     parser.add_argument("--allow-no-abtt",action="store_true",
                          help="token mode only: allow searching without the corpus '_abtt.json' file (testing/A-B comparison). "
                               "Results are wrong if the index was built WITH ABTT")
@@ -325,11 +326,11 @@ def process_folder(args,input_file):
         print("Processing folder: searching similarity in",len(files),"index files")
         # 3. Mode Force : recalcule tout le dossier (embeddings et index) avant la recherche
     if args.force:
-        encode_folder(input_file,overwrite=True,token_mode=args.token_emb,no_daemon=args.no_daemon,use_ollama=args.use_ollama,ollama_host=OLLAMA_HOST,ollama_model=OLLAMA_MODEL)
+        encode_folder(input_file,overwrite=True,token_mode=args.token_emb,no_daemon=args.no_daemon,use_ollama=args.use_ollama,ollama_host=OLLAMA_HOST,ollama_model=OLLAMA_MODEL,apply_abtt=not args.no_abtt)
         makeIndex_folder(input_folder=input_file,metric_type=faiss.METRIC_INNER_PRODUCT,index_type=args.index_type,overwrite=True,token_mode= args.token_emb)
     print("------------")
         # 4. Lancement de la recherche globale sur le répertoire avec le vecteur pré-calculé
-    search_folder(input_file,query_vector=query_vector,metric_type=faiss.METRIC_INNER_PRODUCT,top_k=args.top_k,token_mode=args.token_emb,verbose=True,allow_no_abtt=args.allow_no_abtt)
+    search_folder(input_file,query_vector=query_vector,metric_type=faiss.METRIC_INNER_PRODUCT,top_k=args.top_k,token_mode=args.token_emb,verbose=True,allow_no_abtt=args.allow_no_abtt or args.no_abtt)
 def main():
     """
     Point d'entrée principal du script CLI.
@@ -471,7 +472,7 @@ def main():
                 else:
                     print("Embeddings file not found, regenerating",metadata_file)
                 embeddings, metadata = calcEmbeddings(collection_file_path=f, output_file_path=embs_file, mode=ext.replace('.','').strip(),
-                                               reduce_precision=args.reduce_precision,overwrite=args.force,token_mode=args.token_emb,no_daemon=args.no_daemon)
+                                               reduce_precision=args.reduce_precision,overwrite=args.force,token_mode=args.token_emb,no_daemon=args.no_daemon,apply_abtt=not args.no_abtt)
             else:
                 print("Found embeddings file",embs_file)
             # Étape C : Indexation
@@ -512,7 +513,7 @@ def main():
     # Cas 7.3 : Tout reconstruire (Fichier index/embeddings absents ou mode forcé --force)
     elif (embeddings_missing and index_missing) or args.force:
         embeddings, metadata = calcEmbeddings(input_file, output_embeddings, mode,
-                                               reduce_precision=args.reduce_precision,overwrite=args.force,token_mode=args.token_emb,no_daemon=args.no_daemon)
+                                               reduce_precision=args.reduce_precision,overwrite=args.force,token_mode=args.token_emb,no_daemon=args.no_daemon,apply_abtt=not args.no_abtt)
         save_metadata(metadata, output_metadata)
         index=makeIndex(embeddings=embeddings, embedding_file_path=None,
                                metric_type=faiss.METRIC_INNER_PRODUCT,

@@ -21,7 +21,7 @@ import numpy as np
 from calcEmbeddings import calcEmbeddings, save_metadata, parse_sentences,encode_folder,fix_punctuation_spaces
 from makeIndex import makeIndex,makeIndex_folder,load_embeddings
 from utils.embed_client import encode
-from searchEmbedding import search, load_metadata, load_index, search_folder,embedd_query,load_lemma_index
+from searchEmbedding import search, load_metadata, load_index, search_folder,embedd_query,load_lemma_index,apply_abtt,abtt_path_from_index
 import logging
 
 # serveur Ollama par défaut
@@ -81,6 +81,24 @@ def get_sent_context(f,sent_id,context_size=10):
         logger.warning("%s, content:%s...",e,target[:20] if target else "[None]")
         return target
     return target
+def prepare_query_no_faiss(args, raw_query, abtt_path):
+    """
+    Renvoie une COPIE de la requête brute, transformée par ABTT si on est en mode token
+    (mêmes μ et P que le corpus). La requête brute n'est jamais modifiée, ce qui permet de
+    la réutiliser d'un fichier à l'autre (faiss.normalize_L2 travaille en place).
+
+    Lève FileNotFoundError si le fichier ABTT manque, sauf si --allow-no-abtt est activé
+    (dans ce cas la requête reste brute, avec un avertissement).
+    """
+    q = np.array(raw_query, dtype=np.float32, order="C", copy=True)
+    if not args.token_emb:
+        return q
+    if os.path.exists(abtt_path):
+        return np.ascontiguousarray(apply_abtt(q, abtt_path), dtype=np.float32)
+    if args.allow_no_abtt:
+        logger.warning("%s not found: searching WITHOUT ABTT (--allow-no-abtt)", abtt_path)
+        return q
+    raise FileNotFoundError(f"{abtt_path} not found (re-run calcEmbeddings, or use --allow-no-abtt for testing)")
 def process_no_faiss(args):
     """
     Effectue une recherche de similarité par produit matriciel direct (dot product) sur les vecteurs normalisés L2 (équivalent de la similarité cosinus)
@@ -103,7 +121,8 @@ def process_no_faiss(args):
     if not args.no_faiss:
         return False
     # Encodage de la requête de l'utilisateur
-    query_embs = embedd_query(query_str=args.query,token_mode=args.token_emb,no_daemon=args.no_daemon)
+    raw_query_embs = embedd_query(query_str=args.query,token_mode=args.token_emb,no_daemon=args.no_daemon)
+    query_embs = raw_query_embs
     # Mode traitement par lots (dossier ou wildcard glob)
     if args.folder or '*' in args.input_file:
         files = glob.glob(args.input_file)
@@ -116,6 +135,11 @@ def process_no_faiss(args):
             #query_embs = embedd_query(query_str=args.query,token_mode=args.token_emb)
             base,ext = os.path.splitext(f)
             print(f"Processing file {i}/{len_f}: {base+token_ext+'.npy'}")
+            try:
+                query_embs = prepare_query_no_faiss(args,raw_query_embs,base+token_ext+"_abtt.json")
+            except FileNotFoundError as e:
+                print(e,"skipping")
+                continue
             try:
                 # Chargement des embeddings bruts
                 embs = load_embeddings(base+token_ext+".npy")
@@ -147,6 +171,11 @@ def process_no_faiss(args):
     # Mode fichier unique
     else:
         base,ext = os.path.splitext(args.input_file)
+        try:
+            query_embs = prepare_query_no_faiss(args,raw_query_embs,base+token_ext+"_abtt.json")
+        except FileNotFoundError as e:
+            print(e)
+            return False
         try:
             embs = load_embeddings(base+token_ext+".npy")
             #combined = np.vstack([embs,query_embs])
@@ -197,7 +226,7 @@ def parse_args():
 
     # Arguments obligatoires
     parser.add_argument("input_file", help="Path to the corpus file (.conllu, .xml or .trs)")
-    parser.add_argument("query", help="Query string to search for")
+    parser.add_argument("query", nargs="?", default=None,help="Query string to search for (not required with --encode-only)")
 
     # Paramètres de l'index FAISS et de la recherche
     parser.add_argument("--index-type", choices=["flat", "hnsw", "ivfpq"], default="ivfpq",
@@ -224,8 +253,15 @@ def parse_args():
     parser.add_argument("--no-faiss",action="store_true",help="processes a query using models directly without FAISS indexation, for testing purpose")
     parser.add_argument("--no-daemon",action="store_true",help="loads embedding models locally and use them instead of calling the daemon")
     parser.add_argument("--use-ollama",action="store_true",help="Use ollama for embeddings")
-    return parser.parse_args()
-def process(args,index, metric_type=faiss.METRIC_INNER_PRODUCT, metadata=None,lemma_list=None):
+    parser.add_argument("--allow-no-abtt",action="store_true",
+                         help="token mode only: allow searching without the corpus '_abtt.json' file (testing/A-B comparison). "
+                              "Results are wrong if the index was built WITH ABTT")
+    args = parser.parse_args()
+    # la requête n'est obligatoire que si on lance une recherche
+    if args.query is None and not args.encode_only and not args.regenerate_metadata:
+        parser.error("the following arguments are required: query (only optional with --encode-only or --regenerate-metadata)")
+    return args
+def process(args,index, metric_type=faiss.METRIC_INNER_PRODUCT, metadata=None,lemma_list=None,abtt_file=None):
     """
     Exécute une requête de recherche sémantique sur un index FAISS unique et affiche les résultats.
 
@@ -236,6 +272,8 @@ def process(args,index, metric_type=faiss.METRIC_INNER_PRODUCT, metadata=None,le
         metadata (dict): Métadonnées associées aux vecteurs (ID, phrases, tokens). Ignoré en mode token.
         lemma_list (list): Requis en mode token — liste ordonnée des lemmes (index i = ligne i
             de l'index FAISS), chargée depuis '_lemma_index.json'.
+        abtt_file (str): Chemin du fichier '_abtt.json' du corpus (mode token). Ignoré en mode phrase.
+            Si absent et que --allow-no-abtt n'est pas activé, la recherche s'arrête avec une erreur.
     """
     query_str=args.query
     top_k=args.top_k
@@ -243,7 +281,11 @@ def process(args,index, metric_type=faiss.METRIC_INNER_PRODUCT, metadata=None,le
     t0 = time.perf_counter()
 
     # Exécution de la recherche vectorielle via le module searchEmbedding
-    result = search(query_str=args.query, index=index, metric_type=faiss.METRIC_INNER_PRODUCT, top_k=args.top_k, metadata=metadata,token_mode=args.token_emb,no_daemon=args.no_daemon,lemma_list=lemma_list)
+    try:
+        result = search(query_str=args.query, index=index, abtt_file=abtt_file, metric_type=faiss.METRIC_INNER_PRODUCT, top_k=args.top_k, metadata=metadata,token_mode=args.token_emb,no_daemon=args.no_daemon,lemma_list=lemma_list,allow_no_abtt=args.allow_no_abtt)
+    except (ValueError, FileNotFoundError) as e:
+        # fichier ABTT manquant : message clair plutôt qu'une trace complète
+        sys.exit(f"Error: {e}. Re-run calcEmbeddings (--force), or use --allow-no-abtt for testing.")
     t1 = time.perf_counter() # chronométrage du temps d'exécution
     exec_time = t1 - t0
 
@@ -287,7 +329,7 @@ def process_folder(args,input_file):
         makeIndex_folder(input_folder=input_file,metric_type=faiss.METRIC_INNER_PRODUCT,index_type=args.index_type,overwrite=True,token_mode= args.token_emb)
     print("------------")
         # 4. Lancement de la recherche globale sur le répertoire avec le vecteur pré-calculé
-    search_folder(input_file,query_vector=query_vector,metric_type=faiss.METRIC_INNER_PRODUCT,top_k=args.top_k,token_mode=args.token_emb,verbose=True)
+    search_folder(input_file,query_vector=query_vector,metric_type=faiss.METRIC_INNER_PRODUCT,top_k=args.top_k,token_mode=args.token_emb,verbose=True,allow_no_abtt=args.allow_no_abtt)
 def main():
     """
     Point d'entrée principal du script CLI.
@@ -391,7 +433,7 @@ def main():
         index = load_index(output_index)
         if args.token_emb:
             lemma_list = load_lemma_index(output_lemma_index)
-        process(args,index=index,metadata=metadata,lemma_list=lemma_list)
+        process(args,index=index,metadata=metadata,lemma_list=lemma_list,abtt_file=abtt_path_from_index(input_file))
         return True
     # Mode 4 : Mode pré-calcul (encodage + indexation), sans lancer de requête utilisateur
     if args.encode_only and (folder or "*" in input_file):
@@ -515,7 +557,7 @@ def main():
                     f"metadata has {len(metadata['raw_text'])} entries). "
                     f"Re-run with --force to rebuild.")
     # Lancement de la requête utilisateur sur l'index préparé
-    process(args,index=index,metadata=metadata,lemma_list=lemma_list)
+    process(args,index=index,metadata=metadata,lemma_list=lemma_list,abtt_file=abtt_path_from_index(output_index))
 
 
 if __name__ == "__main__":

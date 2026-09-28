@@ -51,7 +51,7 @@ Tensor = None
 AutoTokenizer = None
 AutoModel = None
 SentenceTransformer = None
-use_last_n_layers = False
+use_last_n_layers = True
 last_connection_time = 0
 
 
@@ -86,7 +86,6 @@ def load_models(token_mode=False):
     global device
     # Détection automatique de l'accélération matérielle
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    print("device is ",device)
     # Chargement du modèle orienté tokens
     if (token_mode) and (token_model is None):
         model = None
@@ -133,19 +132,6 @@ def all_but_the_top(X, n_components=3):
 
     return X.numpy() if was_numpy else X
 
-
-def average_pool(last_hidden_states: Tensor,
-                 attention_mask: Tensor) -> Tensor:
-    last_hidden = last_hidden_states.masked_fill(~attention_mask[..., None].bool(), 0.0)
-    return last_hidden.sum(dim=1) / attention_mask.sum(dim=1)[..., None]
-
-def average_pool_last_n_layers(hidden_states: tuple[Tensor, ...],
-                                attention_mask: Tensor,
-                                num_layers: int = 4) -> Tensor:
-    # hidden_states = model(**inputs, output_hidden_states=True).hidden_states
-    stacked = torch.stack(hidden_states[-num_layers:])   # (n, batch, seq, hidden)
-    layer_avg = stacked.mean(dim=0)                       # (batch, seq, hidden)
-    return average_pool(layer_avg, attention_mask)
 def merge_subwords_to_words(hidden_states, encoded_batch):
     """
     Regroupe les vecteurs de sous-mots (subwords) en un vecteur par mot, en moyennant

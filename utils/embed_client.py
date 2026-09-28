@@ -14,7 +14,6 @@ import time
 import uuid
 from multiprocessing.connection import Client, Listener
 import logging
-from utils.embed_daemon import average_pool,average_pool_last_n_layers
 import numpy as np
 import requests
 logging.basicConfig(
@@ -125,7 +124,7 @@ def encode_no_daemon(sentences=None,token_mode=False):
         from transformers import AutoTokenizer, AutoModel
         import torch
         from sentence_transformers import SentenceTransformer
-        from utils.embed_daemon import average_pool,average_pool_last_n_layers,merge_subwords_to_words
+        from utils.embed_daemon import merge_subwords_to_words
         logger.info("Loading models...")
         # Initialisation du modèle pour le mode 'phrases' (biliothèque SentenceTransformer)
         model = SentenceTransformer(MODEL_NAME)

@@ -26,7 +26,7 @@ from makeIndex import load_embeddings
 from searchEmbedding import load_metadata,load_index
 from utils.embed_client import encode
 import simplemma
-
+import torch
 CHUNK_SIZE = 64
 # étiquette utiliée pour remplacer les phrases manquantes quand
 MISSING_SENTENCE = "[phrase manquante]"
@@ -43,6 +43,33 @@ import conllu
 from lxml import etree
 # regex utilisé pour détecter les lignes CoNLLU représentant des amalgames, ex. 'du' --> 'de' et 'le', afin d'ignorer les lignes correspondant aux deux sous-morphèmes et ne garder que celle de la forme amalgamée. Ces lignes sont reconnaissables par leur numérotation, ex. 1 du 1-2 de 1-3 le
 AMALGAM_REGEX = r'^\d+\-\d+'
+
+
+
+def all_but_the_top(X, n_components=3):
+    """
+    Retire les n_components premières composantes principales (anti-anisotropie,
+    alternative au whitening).
+    Appliquer sur la matrice de lemmes complète, une fois par fichier.
+    Utilisée uniquement en mode token
+    """
+    was_numpy = isinstance(X, np.ndarray)
+    if was_numpy:
+        X = torch.from_numpy(np.ascontiguousarray(X, dtype=np.float32))
+    mu = X.mean(dim=0, keepdim=True)
+    X = X - mu
+    q = min(n_components, X.shape[0], X.shape[1])
+    P = None
+    if q > 0:
+        U, S, V = torch.pca_lowrank(X, q=q)
+        P = V[:, :q]
+        X = X - X @ P @ P.T
+    out = X.numpy() if was_numpy else X
+    mu_np = mu.squeeze(0).numpy()
+    P_np = P.numpy() if P is not None else None
+    return out, mu_np, P_np
+
+
 #---- helper functions -
 def parse_conllu_raw_entries(file_content):
     """
@@ -59,7 +86,7 @@ def parse_conllu_raw_entries(file_content):
     return [s.strip() for s in file_content.split('\n\n') if s.strip()]
 
 def is_amalgame(line):
-    """
+    f"""
     Vérifie si une ligne d'annotation correspond à un mot amalgame (multi-mots).
     En CoNLLU, ces lignes utilisent un intervalle d'identifiants (ex: dans les fichiers CoNLLU, 'du' est décomposé en de et le donc deux lignes correspondant aux deux morphèmes décomposées en plus d'une ligne de la forme amalgamée, le script ne conserve que la ligne de l'amalgame et ignore ses sous-composantes).
     """
@@ -496,7 +523,7 @@ def calcEmbeddings(collection_file_path=None, output_file_path=None, mode=None,r
     logger.info("parsing sentences, file=%s mode=%s",collection_file_path,mode)
     sentence_list,metadata = parse_sentences(collection_file_path,mode=mode)
     logger.info("Encoding sentences with model")
-
+    # encodage en mode token
     t0 = time.perf_counter()
     if token_mode:
         logger.info("using token level embedding mode")
@@ -504,6 +531,7 @@ def calcEmbeddings(collection_file_path=None, output_file_path=None, mode=None,r
             " ".join(t.replace(" ", "_") for t in tok_list) if tok_list else ""
             for tok_list in metadata["tokens"]
         ]
+        # les tokens sont d'abord encodés par le daemon qui retourne une liste de listes d'embeddings [phrase [emb token1, emb token2...]]
         embeddings = encode(
             token_input_list,
             chunk_size=CHUNK_SIZE,
@@ -513,15 +541,22 @@ def calcEmbeddings(collection_file_path=None, output_file_path=None, mode=None,r
             ollama_host=ollama_host,
             ollama_model=ollama_model
         )
-
+        # ensuite, on crée une liste d'embeddings de tokens par lemme: en se basant sur une liste sans doublons des lemmes du corpus en cours,
+        # on calcule la moyenne de tous les tokens de chaque lemme et en crée une liste: [lemme1 [moyenne embs tokens],lemme2 [moyenne embs tokens]...]
         lemma_list, lemma_embeddings = build_lemma_embeddings(
             embeddings, metadata["lemmas"]
         )
-        embeddings = lemma_embeddings
-
+        # on applique all_but_the_top aux embeddings (elle est plutôt appliquée ici au lieu d'être directement appliquée aux embeddings des lemmes individuels vu la quantité exponentielle de mémoire que cela nécessiterait)
+        lemma_embeddings, mu, P = all_but_the_top(lemma_embeddings, n_components=3)
+        # on enregistre les paramètres de la fonction all_but_the_top par corpus pour permettre de les applquer à la requête lors de la recherche sémantique: obligatoire pour que la requête se trouve dans le même espace que les embeddings du corpus
+        abtt_path = effective_output_path.replace(".npy", "_abtt.json")
+        with open(abtt_path, "w", encoding="utf-8") as f:
+            json.dump({"mean": mu.tolist(), "components": P.tolist()}, f)
+            embeddings = lemma_embeddings
+        # permet de réduire la taille du fichier embeddings par un facteur de 2x si activé, en réduisant la précision
         if reduce_precision:
             embeddings = embeddings.astype(np.float16)
-
+        # enregistrement des embeddings sur le disque: ce fichier pourrait être effacé après la création de l'index faiss avec makeIndex
         np.save(effective_output_path, embeddings)
 
         lemma_index_path = effective_output_path.replace(".npy", "_lemma_index.json")
@@ -529,7 +564,9 @@ def calcEmbeddings(collection_file_path=None, output_file_path=None, mode=None,r
             json.dump(lemma_list, f, ensure_ascii=False)
         logger.info("lemma index saved to %s", lemma_index_path)
     else:
+        # mode embedding de phrase (sentence transformers)
         logger.info("using sentence level embedding mode")
+        # encodage par phrase
         embeddings = encode(
             sentence_list,
             chunk_size=CHUNK_SIZE,

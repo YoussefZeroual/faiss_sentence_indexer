@@ -21,7 +21,7 @@ import numpy as np
 from calcEmbeddings import calcEmbeddings, save_metadata, parse_sentences,encode_folder,fix_punctuation_spaces
 from makeIndex import makeIndex,makeIndex_folder,load_embeddings
 from utils.embed_client import encode
-from searchEmbedding import search, load_metadata, load_index, search_folder,embedd_query
+from searchEmbedding import search, load_metadata, load_index, search_folder,embedd_query,load_lemma_index
 import logging
 
 # serveur Ollama par défaut
@@ -225,7 +225,7 @@ def parse_args():
     parser.add_argument("--no-daemon",action="store_true",help="loads embedding models locally and use them instead of calling the daemon")
     parser.add_argument("--use-ollama",action="store_true",help="Use ollama for embeddings")
     return parser.parse_args()
-def process(args,index, metric_type=faiss.METRIC_INNER_PRODUCT, metadata=None):
+def process(args,index, metric_type=faiss.METRIC_INNER_PRODUCT, metadata=None,lemma_list=None):
     """
     Exécute une requête de recherche sémantique sur un index FAISS unique et affiche les résultats.
 
@@ -233,7 +233,9 @@ def process(args,index, metric_type=faiss.METRIC_INNER_PRODUCT, metadata=None):
         args (argparse.Namespace): objet arguments de la ligne de commande contenant la requête et les options.
         index (faiss.Index): L'index FAISS chargé en mémoire.
         metric_type (int): Type de métrique de distance (défaut: produit scalaire).
-        metadata (dict): Métadonnées associées aux vecteurs (ID, phrases, tokens).
+        metadata (dict): Métadonnées associées aux vecteurs (ID, phrases, tokens). Ignoré en mode token.
+        lemma_list (list): Requis en mode token — liste ordonnée des lemmes (index i = ligne i
+            de l'index FAISS), chargée depuis '_lemma_index.json'.
     """
     query_str=args.query
     top_k=args.top_k
@@ -241,14 +243,19 @@ def process(args,index, metric_type=faiss.METRIC_INNER_PRODUCT, metadata=None):
     t0 = time.perf_counter()
 
     # Exécution de la recherche vectorielle via le module searchEmbedding
-    result = search(query_str=args.query, index=index, metric_type=faiss.METRIC_INNER_PRODUCT, top_k=args.top_k, metadata=metadata,token_mode=args.token_emb,no_daemon=args.no_daemon)
+    result = search(query_str=args.query, index=index, metric_type=faiss.METRIC_INNER_PRODUCT, top_k=args.top_k, metadata=metadata,token_mode=args.token_emb,no_daemon=args.no_daemon,lemma_list=lemma_list)
     t1 = time.perf_counter() # chronométrage du temps d'exécution
     exec_time = t1 - t0
 
     # Affichage des résultats dans la console
-    print("Sent id               | Sentence    | similarity score")
-    for r in result:
-        print(f"{r[0]} | {r[1]} |  {r[2]}")
+    if args.token_emb:
+        print("lemma          | similarity score")
+        for r in result:
+            print(f"{r[0]} |  {r[1]}")
+    else:
+        print("Sent id               | Sentence    | similarity score")
+        for r in result:
+            print(f"{r[0]} | {r[1]} |  {r[2]}")
     print("temps d'exécution de la requête Faiss:",np.round(exec_time,2))
 def process_folder(args,input_file):
     """
@@ -298,13 +305,29 @@ def main():
     folder = args.folder
 
     # Définition des chemins de fichiers de sortie attendus
+    # En mode token, embeddings et index portent le suffixe '_token' (voir calcEmbeddings/makeIndex);
+    # les métadonnées de phrases restent communes aux deux modes (sent_id/raw_text/tokens/lemmas).
     base, ext = os.path.splitext(input_file)
-    output_index = base + ".faiss"
+    token_suffix = "_token" if args.token_emb else ""
+    output_index = base + token_suffix + ".faiss"
     output_metadata = base + ".json"
-    output_embeddings = base + ".npy"
+    output_embeddings = base + token_suffix + ".npy"
+    # calcEmbeddings dérive ce chemin à partir de output_embeddings (qui porte déjà le
+    # suffixe '_token'), donc le fichier réel est '..._token_lemma_index.json', pas
+    # '..._lemma_index.json'.
+    output_lemma_index = base + token_suffix + "_lemma_index.json"
+    # lemma_list par défaut : reste None en mode phrase, et sera chargé plus bas en mode token
+    lemma_list = None
     # Évaluation de l'état du cache (fichiers manquants ou écrasement forcé)
     # Règle : Si les embeddings sont recalculés, l'index doit être reconstruit.
-    embeddings_missing = args.force or not os.path.exists(output_embeddings) or not os.path.exists(output_metadata)
+    # En mode token, l'index de lemmes ('_lemma_index.json') est indissociable du fichier
+    # d'embeddings (_token.npy) : sans lui, les lignes de la matrice ne peuvent pas être
+    # associées à un lemme. On le traite donc comme faisant partie des "embeddings manquants",
+    # ce qui force un recalcul complet via calcEmbeddings (Cas 7.3) plutôt qu'une simple
+    # reconstruction d'index à partir d'un .npy dont le mapping serait perdu (Cas 7.4).
+    embeddings_missing = (args.force or not os.path.exists(output_embeddings)
+                          or not os.path.exists(output_metadata)
+                          or (args.token_emb and not os.path.exists(output_lemma_index)))
     index_missing = args.force or (embeddings_missing) or (not os.path.exists(output_index))
     metadata_messing = not os.path.exists(output_metadata)
 
@@ -366,7 +389,9 @@ def main():
     if ext == ".faiss" :
         metadata = load_metadata(output_metadata)
         index = load_index(output_index)
-        process(args,index=index,metadata=metadata)
+        if args.token_emb:
+            lemma_list = load_lemma_index(output_lemma_index)
+        process(args,index=index,metadata=metadata,lemma_list=lemma_list)
         return True
     # Mode 4 : Mode pré-calcul (encodage + indexation), sans lancer de requête utilisateur
     if args.encode_only and (folder or "*" in input_file):
@@ -472,15 +497,25 @@ def main():
                                    index_type="flat", output_file_path=output_index)
             else:
                 raise
-    # Validation d'intégrité finale : vérifie que l'index FAISS et le JSON ont le même nombre d'entrées
-    if not index_missing:
-        index = load_index(output_index)
+    # Validation d'intégrité finale : vérifie que l'index FAISS et le fichier de mapping (lemmes
+    # en mode token, métadonnées de phrases sinon) ont le même nombre d'entrées.
+    # Effectué inconditionnellement (pas seulement si l'index existait déjà) car lemma_list doit
+    # être chargé avant process() quel que soit le chemin de code qui a préparé l'index
+    # (chargement direct, ou reconstruction fraîche juste au-dessus).
+    index = load_index(output_index)
+    if args.token_emb:
+        lemma_list = load_lemma_index(output_lemma_index)
+        if index.ntotal != len(lemma_list):
+            sys.exit(f"Error: index/lemma mismatch (index has {index.ntotal} vectors, "
+                    f"lemma index has {len(lemma_list)} entries). "
+                    f"Re-run with --force to rebuild.")
+    else:
         if index.ntotal != len(metadata["raw_text"]):
             sys.exit(f"Error: index/metadata mismatch (index has {index.ntotal} vectors, "
                     f"metadata has {len(metadata['raw_text'])} entries). "
                     f"Re-run with --force to rebuild.")
     # Lancement de la requête utilisateur sur l'index préparé
-    process(args,index=index,metadata=metadata)
+    process(args,index=index,metadata=metadata,lemma_list=lemma_list)
 
 
 if __name__ == "__main__":

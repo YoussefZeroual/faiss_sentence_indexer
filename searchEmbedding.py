@@ -10,7 +10,6 @@
 import numpy as np
 import json
 import logging
-
 # configuration du journal pour l'affichage des message et des avertissements
 logging.basicConfig(
     level=logging.INFO,
@@ -80,7 +79,9 @@ def embedd_query(query_str=None,token_mode=False,no_daemon=False,use_ollama=Fals
 
     Args:
         query_str (str,): Le texte de la requête à encoder.
-        token_mode (bool): Si True, utilise l'encodage au niveau des tokens au lieu du niveau phrase.
+        token_mode (bool): Si True, encode la requête au niveau des tokens puis moyenne
+            les vecteurs de mots obtenus en un seul vecteur (la requête devient un point
+            unique dans le même espace que l'index de lemmes moyennés).
         no_daemon (bool): Si True, exécute l'encodage localement sans utiliser le processus démon en arrière-plan.
         use_ollama (bool): Si True, délègue la création de l'embedding à un modèle d'embedding via Ollama (très lent).
         ollama_host (str): L'adresse de l'hôte Ollama (par défaut 'localhost').
@@ -96,76 +97,80 @@ def embedd_query(query_str=None,token_mode=False,no_daemon=False,use_ollama=Fals
     if token_mode:
         logger.info("Encoding query with token level mode")
     else:
-              logger.info("Encoding query with sentence level mode")
+        logger.info("Encoding query with sentence level mode")
     import time
-    # Démarrage du chronomètre pour mesurer le temps d'encodage
     t0 = time.perf_counter()
     if query_str is not None:
         logger.info("embedding query: %s",query_str)
-        # Encodage selon le mode choisi (token ou phrase), en envoyant une liste contenant un seul élément (la requête)
         if token_mode:
-            #from utils.embed_daemon import all_but_the_top
-            embeddings = encode([query_str],chunk_size=1,token_mode=True,no_daemon=no_daemon,use_ollama=use_ollama,ollama_host=ollama_host,ollama_model=ollama_model)
+            # encode() en mode token retourne une liste d'un seul élément (une phrase, la requête),
+            # cet élément étant un tableau (n_mots_requete, hidden_dim) -> on moyenne pour obtenir
+            # un seul vecteur, dans le même espace que l'index de lemmes moyennés
+            word_vecs = encode([query_str],chunk_size=1,token_mode=True,no_daemon=no_daemon,use_ollama=use_ollama,ollama_host=ollama_host,ollama_model=ollama_model)
+            embeddings = np.mean(word_vecs[0], axis=0, keepdims=True)
         else:
             embeddings = encode([query_str],chunk_size=1,no_daemon=no_daemon,use_ollama=use_ollama,ollama_host=ollama_host,ollama_model=ollama_model)
-        import numpy as np
-        # Arrêt du chronomètre et calcul du temps d'exécution
+            embeddings = np.array(embeddings,dtype=np.float32).reshape(1,-1)
         t1 = time.perf_counter()
         exec_time = t1-t0
         logger.info("Query encoded in %s seconds",np.round(exec_time,2))
-        # Transformation de la liste d'embeddings en tableau NumPy 2D de type float32 (requis par FAISS)
-        embeddings = np.array(embeddings,dtype=np.float32).reshape(1,-1)
-        # S'assure que le tableau est stocké de manière contiguë en mémoire pour des performances optimales lors de la recherche
         embeddings = np.ascontiguousarray(embeddings, dtype=np.float32)
-
         return embeddings
     else:
-        # Journalisation et déclenchement d'une erreur si la requête est absente
-        logger.warning("Query is empty")
         logger.warning("Query is empty")
         raise ValueError("Query is empty")
 
-def search(query_vector=None,query_str=None, index=None, metric_type=None, top_k=10, metadata=None,token_mode=False,no_daemon=False):
+def search(query_vector=None,query_str=None, index=None, metric_type=None, top_k=10, metadata=None,token_mode=False,no_daemon=False,lemma_list=None):
     """
     Fonction principale du script.
     Exécute une recherche de similarité dans un index FAISS et renvoie les meilleures correspondances avec leurs métadonnées (phrases, identifiants et score de similarité cosinus).
 
-    Args:
+       Args:
         query_vector (numpy.ndarray): Le vecteur d'embedding pré-calculé de la requête.
         query_str (str): Le texte de la requête (utilisé pour générer l'embedding si query_vector est None).
         index (faiss.Index): L'objet index FAISS dans lequel effectuer la recherche.
         metric_type (int): Le type de métrique FAISS utilisé (par défaut faiss.METRIC_INNER_PRODUCT qui correspond à une similarité cosinus étant donné que les vecteurs sont déjà normalisés L2).
         top_k (int): Le nombre maximal de résultats similaires à retourner (défaut: 10).
-        metadata (dict): Le dictionnaire contenant les phrases en texte brut avec leurs identifiants ('sent_id', 'raw_text').
+        metadata (dict): Le dictionnaire contenant les phrases en texte brut avec leurs identifiants ('sent_id', 'raw_text'). Ignoré en mode token.
         token_mode (bool): Détermine si l'encodage d'une nouvelle requête se fait au niveau des tokens.
         no_daemon (bool): Détermine si l'encodage local est utilisé sans le processus démon.
+        lemma_list (list): Requis en mode token — liste ordonnée des lemmes (index i = ligne i de l'index FAISS), chargée depuis '_lemma_index.json'.
 
     Valeurs de retour:
-        list: Une liste de tuples sous le format (identifiant_phrase, texte_brut, score_similarité). Retourne une liste vide en cas d'erreur de dimension qui est généralement un résultat d'incompatibilité entre les vecteurs de la requête et ceux du corpus cible (utilisation par erreur de deux modèles différents).
+        list: En mode phrase, tuples (sent_id, raw_text, score_similarité). En mode token,
+            tuples (lemme, score_similarité). Retourne une liste vide en cas d'erreur de
     """
     # Déterminer le nombre total d'entrées des métadonnées pour éviter les débordements d'indices lors du mapping
-    len_metadata = len(metadata["raw_text"])
-    # Si aucun vecteur pré-calculé n'est fourni, on encode la requête textuelle à la volée
     if query_vector is None:
         query_vector = embedd_query(query_str,token_mode,no_daemon=no_daemon)
-    # Normalisation L2 du vecteur de requête, essentielle pour que le inner product soit équivalent à une similarité cosinus
     faiss.normalize_L2(query_vector)
-    # Ajustement du paramètre nprobe pour certains types d'index (index partitionnés comme IVF qui divise l'espace vectoriel en régions) afin d'améliorer la précision de la recherche
-    logger.debug("has nprobe attr:%s", hasattr(index, "nprobe"))
     if hasattr(index, "nprobe"):
         index.nprobe = 64
     try:
-        # Lancement de la recherche FAISS pour extraire les k plus proches voisins (distances et indices)
         distances, indices = index.search(query_vector, top_k)
-        # Création de la liste finale en associant l'ID, le texte et la distance arrondie (seulement si l'index est valide)
-        matches = [(metadata["sent_id"][idx],metadata["raw_text"][idx], np.round(float(distance),3))
-                for idx, distance in zip(indices[0], distances[0])
-                if 0 <= idx < len_metadata]
-    # Capture des erreurs fréquentes (ex: discordance entre la dimensionnalité de la requête et celle de l'index)
+        if token_mode:
+            len_lemmas = len(lemma_list)
+            matches = [(lemma_list[idx], np.round(float(distance),3))
+                    for idx, distance in zip(indices[0], distances[0])
+                    if 0 <= idx < len_lemmas]
+        else:
+            len_metadata = len(metadata["raw_text"])
+            matches = [(metadata["sent_id"][idx],metadata["raw_text"][idx], np.round(float(distance),3))
+                    for idx, distance in zip(indices[0], distances[0])
+                    if 0 <= idx < len_metadata]
     except AssertionError as e:
         logger.warning("Assert error: query was probably encoded using a different model than target embeddings, please reembed target texts")
         return []
     return matches
+
+def load_lemma_index(lemma_index_path=None):
+    """
+    Charge la liste ordonnée des lemmes depuis un fichier '_lemma_index.json',
+    où l'index i correspond à la ligne i de l'index FAISS token-mode.
+    """
+    logger.info("loading lemma index from:%s",lemma_index_path)
+    with open(lemma_index_path,"r",encoding="utf-8") as f:
+        return json.load(f)
 def search_folder(input_folder=None,query_str=None,query_vector=None,metric_type=faiss.METRIC_INNER_PRODUCT,top_k=10,verbose=True,token_mode=False,no_daemon=False):
     """
     Exécute une recherche de similarité textuelle sur un ensemble d'index FAISS contenus dans un dossier.
@@ -188,20 +193,15 @@ def search_folder(input_folder=None,query_str=None,query_vector=None,metric_type
     logger.info("Folder embedding search")
     import glob
     import os
-    token_suffix = ""
-    # Définition des extensions cibles selon le mode d'encodage choisi
     if token_mode:
         index_ext = "_token.faiss"
-        token_suffix = "_token"
     else:
        index_ext = ".faiss"
-    # Récupération des chemins des fichiers via le module glob (supporte les wildcards '*')
     if '*' in input_folder:
         file_list = glob.glob(input_folder)
         file_list = [os.path.splitext(f)[0].replace("_token","")+index_ext  for f in file_list]
     else:
         file_list = glob.glob(input_folder+"/*"+index_ext)
-    # Filtrage strict et déduplication pour s'assurer de ne garder que les fichiers d'index pertinents
     if token_mode:
         file_list = list(set([f for f in file_list if os.path.splitext(f)[1] ==".faiss" and '_token' in f]))
     else:
@@ -210,36 +210,40 @@ def search_folder(input_folder=None,query_str=None,query_vector=None,metric_type
     results = []
     skipped = False
     logger.info("Found %s files in folder",len_f)
-    # Si aucun vecteur n'est fourni, on encode la requête
     if query_vector is None:
         query_vector = embedd_query(query_str,token_mode,no_daemon=no_daemon)
     faiss.normalize_L2(query_vector)
-    # Itération sur chaque fichier d'index trouvé dans le répertoire
     for f in file_list:
         base, ext = os.path.splitext(f)
-        # Chargement de l'index
         try:
             index = load_index(f)
         except RuntimeError as e:
             logger.warning("%s index file not found in directory,skipping file",base+".faiss")
             skipped = True
             continue
-        # Chargement des métadonnées correspondantes
-        try:
-            metadata = load_metadata(base.replace("_token","")+".json")
-        except FileNotFoundError as e:
-            logger.warning("%s metadata file not found in directory,skipping file",base+".json")
-            skipped = True
-            continue
-        # Recherche des correspondances locales dans ce fichier spécifique
-        result = search(query_str=query_str,query_vector=query_vector, index=index, metric_type=metric_type, top_k=top_k, metadata=metadata,token_mode=token_mode,no_daemon=no_daemon)
-        # Formatage des résultats pour inclure le nom du fichier source (f)
-        result = [(f,r[0],r[1],float(r[2]))
-               for r  in result]
+        if token_mode:
+            # en mode token, charge la liste des lemmes plutôt que les métadonnées de phrases
+            lemma_index_path = base+"_lemma_index.json"
+            try:
+                lemma_list = load_lemma_index(lemma_index_path)
+            except FileNotFoundError as e:
+                logger.warning("%s lemma index file not found in directory,skipping file",lemma_index_path)
+                skipped = True
+                continue
+            result = search(query_str=query_str,query_vector=query_vector, index=index, metric_type=metric_type, top_k=top_k, token_mode=token_mode,no_daemon=no_daemon,lemma_list=lemma_list)
+            result = [(f,r[0],float(r[1])) for r in result]
+        else:
+            try:
+                metadata = load_metadata(base+".json")
+            except FileNotFoundError as e:
+                logger.warning("%s metadata file not found in directory,skipping file",base+".json")
+                skipped = True
+                continue
+            result = search(query_str=query_str,query_vector=query_vector, index=index, metric_type=metric_type, top_k=top_k, metadata=metadata,token_mode=token_mode,no_daemon=no_daemon)
+            result = [(f,r[0],r[1],float(r[2])) for r in result]
         results.extend(result)
-    # Tri global de tous les résultats agrégés par score de similarité (indice 3), du plus élevé au plus bas
-    results.sort(key=lambda x: x[3],reverse=True)
-    # Conservation des top_k meilleurs résultats sur l'ensemble du corpus
+    sort_idx = 2 if token_mode else 3
+    results.sort(key=lambda x: x[sort_idx],reverse=True)
     results = results[:top_k]
     t1 = time.perf_counter()
     exec_time = t1-t0
@@ -248,9 +252,13 @@ def search_folder(input_folder=None,query_str=None,query_vector=None,metric_type
         logger.warning("Some index files were skipped because file or corresponding metadata files were not found")
     if results ==[]:
         logger.warning("Search query didn't return any results, input file list probaby empty")
-    # Affichage tabulaire des correspondances trouvées
     if verbose:
-        print("index file                | Sent id               | Sentence    | similarity score")
-        for r in results:
-            print(f"{r[0]} | {r[1]} | {r[2]} | {r[3]}")
+        if token_mode:
+            print("index file                | lemma       | similarity score")
+            for r in results:
+                print(f"{r[0]} | {r[1]} | {r[2]}")
+        else:
+            print("index file                | Sent id               | Sentence    | similarity score")
+            for r in results:
+                print(f"{r[0]} | {r[1]} | {r[2]} | {r[3]}")
 

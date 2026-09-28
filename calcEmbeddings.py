@@ -25,6 +25,9 @@ import os
 from makeIndex import load_embeddings
 from searchEmbedding import load_metadata,load_index
 from utils.embed_client import encode
+import simplemma
+
+CHUNK_SIZE = 64
 # étiquette utiliée pour remplacer les phrases manquantes quand
 MISSING_SENTENCE = "[phrase manquante]"
 logging.basicConfig(
@@ -71,31 +74,37 @@ def has_amalgams(text):
     else:
         return True
 def concat_forms(text):
-    """
+    r"""
     Reconstruit le texte brut à partir des formes d'un bloc CoNLLU.
     Gère spécifiquement les amalgames en ignorant leurs composants enfants pour éviter les doublons.
+    Utilise [^\t\n]+ plutôt que \S+ pour capturer la colonne FORM : certaines formes de
+    surface contiennent un espace interne (ex. 'quand même', 'est-ce que', 'tout le long du'),
+    et \S+ tronquait ces valeurs au premier espace, les colonnes CoNLLU étant séparées par
+    des tabulations et non par n'importe quel espace.
     """
     tokens = []
     if has_amalgams(text):
-        lines = text.split('\n')
-        for i,t in enumerate(lines):
-            if (not is_amalgame(lines[i-2])) and (not is_amalgame(lines[i-1])):
-                tokens.append(t)
-        joined_tokens = "\n".join(tokens)
-        # capture only amalgame lines or non amagame lines (skips amalgam child lines)
-        # capture les formes de surface via une regexcapure uniquement les lignes des amalgames en ignorant leurs sous-composants
-        raw_text = re.findall(r'(?:^\d+\-\d+\s+|^\d+\s+)(\S+)', joined_tokens, re.MULTILINE)
-        raw_text = " ".join(raw_text)
-        raw_text = fix_punctuation_spaces(raw_text)
+            lines = text.split('\n')
+            kept_lines = []
+            for i,t in enumerate(lines):
+                if (not is_amalgame(lines[i-2])) and (not is_amalgame(lines[i-1])):
+                    kept_lines.append(t)
+            joined_tokens = "\n".join(kept_lines)
+            # capture only amalgame lines or non amagame lines (skips amalgam child lines)
+            # capture les formes de surface via une regex, en capturant la colonne FORM jusqu'à la tabulation suivante
+            forms = re.findall(r'(?:^\d+\-\d+\t|^\d+\t)([^\t\n]+)', joined_tokens, re.MULTILINE)
+            tokens = forms  # 1 token par mot de surface (amalgames inclus), aligné avec les lemmes
+            raw_text = " ".join(forms)
+            raw_text = fix_punctuation_spaces(raw_text)
 
     else:
         # Extraction normale si aucun amalgame n'est présent
-        raw_text = re.findall(r'^\d+\s+(\S+)', text, re.MULTILINE)
+        forms = re.findall(r'^\d+\t([^\t\n]+)', text, re.MULTILINE)
+        tokens = forms  # 1 token par ligne CoNLLU, aligné avec les lemmes
 
-        raw_text = " ".join(raw_text)
+        raw_text = " ".join(forms)
         raw_text = fix_punctuation_spaces(raw_text)
-        tokens = get_tokens(raw_text)
-    return raw_text,tokens
+    return raw_text, tokens
 
 def get_sent_id(text):
     """
@@ -128,11 +137,63 @@ def get_tokens(text):
         return text.split("\n")
     else:
         return text.split(" ")
+def get_lemmas(text):
+    f"""
+    Extrait la liste des lemmes à partir d'un bloc CoNLLU brut, alignée mot-de-surface
+    par mot-de-surface avec concat_forms (un lemme par mot de surface, y compris les
+    amalgames). Pour un amalgame, la colonne LEMMA vaut "_" (non renseignée) ; on utilise
+    alors sa propre forme de surface (FORM) comme lemme de substitution, et on ignore
+    ses sous-composants, exactement comme concat_forms le fait pour les tokens.
 
+    Utilise [^\t\n]+ plutôt que \S+/\s+ pour capturer les colonnes FORM et LEMMA :
+    certaines valeurs contiennent un espace interne (ex. 'quand même', 'en résumé'),
+    et \S+ tronquait ces valeurs au premier espace, les colonnes CoNLLU étant séparées
+    par des tabulations et non par n'importe quel espace.
+
+    Args:
+        text (str): Bloc CoNLLU brut d'une phrase (comme reçu par concat_forms).
+
+    Valeur de retour:
+        list: Liste des lemmes, une entrée par mot de surface, alignée avec tokens.
+    """
+    lines = text.split('\n')
+    lemmas = []
+    for i, line in enumerate(lines):
+        # ignore les lignes correspondant aux sous-composants d'un amalgame déjà traité
+        if (i >= 1 and is_amalgame(lines[i-1])) or (i >= 2 and is_amalgame(lines[i-2])):
+            continue
+        if is_amalgame(line):
+            # ligne amalgame : LEMMA="_", on utilise sa forme de surface (colonne FORM) comme lemme de substitution
+            match = re.match(r'^\d+\-\d+\t([^\t\n]+)', line)
+        else:
+            match = re.match(r'^\d+\t[^\t\n]+\t([^\t\n]+)', line)
+        if match:
+            lemmas.append(match.group(1))
+    return lemmas
+
+def get_lemmas_fast(text,lang='fr'):
+    """
+    Lemmatise un texte brut (sans annotation CoNLLU) à l'aide de simplemma.
+    Utilisé comme solution de repli légère et rapide pour les formats sans colonne LEMMA
+    (XML sans CoNLLU imbriqué, TRS). Moins précis qu'une vraie lemmatisation morphosyntaxique
+    (pas de désambiguïsation par POS), mais suffisant comme approximation par lot.
+
+    Args:
+        text (str): Texte brut à lemmatiser.
+        lang (str): Code langue simplemma (ex: 'fr' pour le français).
+
+    Valeur de retour:
+        list: Liste des lemmes, ou None si le texte est vide/manquant.
+    """
+    logger.warning("Lemmatisation absente (le fichier d'entrée n'est pas un ConLL-U): lemmatisation avec Simplemma")
+    if text is None or not text.split() or text == MISSING_SENTENCE:
+        return None
+    return list(simplemma.text_lemmatizer(text,lang=lang))
 def parse_conllu_fast(file_path,text=None):
     """
     Analyse un fichier ou un texte au format CoNLLU pour extraire les phrases et leurs métadonnées.
-    Possède une alternative (fallback) si le texte brut n'est pas explicitement annoté avec une balise #text_raw.
+    Reconstruit systématiquement le texte brut à partir des formes (colonne FORM) et des
+    lemmes (colonne LEMMA) de chaque ligne d'annotation, en gérant les amalgames.
 
     Args:
         file_path (str): Le chemin d'accès au fichier CoNLLU.
@@ -141,70 +202,36 @@ def parse_conllu_fast(file_path,text=None):
     Valeurs de retour:
         tuple: (sent_list, metadata)
             - sent_list (list): Liste des phrases sous forme de texte brut.
-            - metadata (dict): Dictionnaire contenant 'sent_id', 'raw_text', et 'tokens'.
+            - metadata (dict): Dictionnaire contenant 'sent_id', 'raw_text', 'tokens' et 'lemmas'.
     """
     metadata = {"sent_id": [],
                 "raw_text": [],
-                "tokens":[]}
+                "tokens":[],
+                "lemmas":[]}
     sent_list = []
-    sent_id = None
-    text_raw = None
     # Chargement du contenu : depuis la variable texte si fournie, sinon lecture du fichier
     if text is not None:
         content = text
     else:
         with open(file_path, "r", encoding="utf-8") as f:
             content = f.read()
-    # Première tentative d'extraction rapide via les métadonnées de l'en-tête de chaque phrase (balises #text_raw)
-    for line in content.splitlines():
-        line = line.rstrip("\n")
-        if line.startswith("#"):
-            # Normalisation : supprime '#', sépare au premier '=', nettoie les espaces
-            key_value = line[1:].split("=", 1)
-            if len(key_value) != 2:
-                continue
-            key, value = key_value[0].strip(), key_value[1].strip()
-            if key == "sent_id":
-                sent_id = value
-            elif key == "text_raw":
-                text_raw = value
-        elif line == "":  # Une ligne vide marque la fin du bloc d'une phrase en CoNLLU
-            if sent_id is not None:
-                metadata["sent_id"].append(sent_id)
-                metadata["raw_text"].append(text_raw)
-                sent_list.append(text_raw)
-                metadata["tokens"].append(get_tokens(text_raw))
-            sent_id, text_raw = None, None
-    # Capture la toute dernière phrase si le fichier ne se termine pas proprement par une ligne vide
-    if sent_id is not None:
-        metadata["sent_id"].append(sent_id)
-        text_raw = clean_sentence(text_raw,file_path,sent_id)
-        metadata["raw_text"].append(text_raw)
-        sent_list.append(text_raw)
 
-    # VÉRIFICATION ET ALTERNATIVE (FALLBACK) BASÉE SUR LE PARSING ET CONCATÉNATION DES FORMES INDIVIDUELLES
-    # Si la liste des phrases précédemment parsée est vide ou si au moins 3 phrases n'ont pas de 'text_raw', la méthode rapide est jugée échouée. On bascule vers la deuxième méthode (concaténation des formes)
-    if (sent_list == []) or (sum(x is None for x in sent_list) >= 3):
-        logger.info("sent_list has None entries, falling back to form concatenation method")
-        # Découpage du fichier en blocs bruts
-        raw_entries = parse_conllu_raw_entries(content)
-        # Réinitialisation des structures de données
-        metadata = {"sent_id": [], "raw_text": [],"tokens":[]}
-        sent_list = []
-        sent_id = None
-        text_raw = None
-        for i,sent in enumerate(raw_entries):
-         # Reconstruction du texte à partir des formes individuelles (avec gestion des amalgames)
-            text_raw,tokens = concat_forms(sent)
-            sent_id = get_sent_id(sent)
-            # utilisation de l'indice de la phrase dans le fichier si la balise #sent_id est absente
-            if sent_id is None:
-                sent_id = i
-            text_raw = clean_sentence(text_raw,file_path,sent_id)
-            metadata["sent_id"].append(sent_id)
-            metadata["raw_text"].append(text_raw)
-            metadata["tokens"].append(tokens)
-            sent_list.append(text_raw)
+    # Découpage du fichier en blocs bruts (une entrée = une phrase, lignes séparées par \n)
+    raw_entries = parse_conllu_raw_entries(content)
+    for i,sent in enumerate(raw_entries):
+        # Reconstruction du texte à partir des formes individuelles (avec gestion des amalgames)
+        text_raw,tokens = concat_forms(sent)
+        lemmas = get_lemmas(sent)
+        sent_id = get_sent_id(sent)
+        # utilisation de l'indice de la phrase dans le fichier si la balise #sent_id est absente
+        if sent_id is None:
+            sent_id = i
+        text_raw = clean_sentence(text_raw,file_path,sent_id)
+        metadata["sent_id"].append(sent_id)
+        metadata["raw_text"].append(text_raw)
+        metadata["tokens"].append(tokens)
+        metadata["lemmas"].append(lemmas)
+        sent_list.append(text_raw)
     return sent_list, metadata
 
 
@@ -255,44 +282,40 @@ def parse_sentences_xml_conllu(filepath):
             - metadata (dict): Dictionnaire contenant 'sent_id', 'raw_text', et 'tokens'.
     """
     data = None
-    # Lecture en mode binaire ("rb"), recommandé pour le parsing XML avec lxml
     with open(filepath,"rb") as f:
         data = f.read()
-    # Initialisation d'un parseur tolérant aux erreurs de syntaxe XML (recover=True)
     parser = etree.XMLParser(recover=True)
     tree = etree.fromstring(data,parser=parser)
-    # Extraction de toutes les balises <s> via une requête XPath
     sentences = tree.xpath("//s")
     len_s = len(sentences)
-    # Initialisation des structures de données
     metadata = {"sent_id": [],
                 "raw_text": [],
-                "tokens":[]}
+                "tokens":[],
+                "lemmas":[]}
     sent_list = []
     xml_conllu = 0
-    # itération dans la liste des s
     for s in sentences:
         sent_id = s.get("id")
-        #initialisation de la variable destinée à stoquer les tokens individuels pour le cas 3
         tokens = None
-        # Cas 1 : Le texte de la balise <s> contient des sauts de ligne: signature probable d'un format CoNLLU contenu
-        if s.text is not None and "\n" in s.text:# and "\t" in s.text:
+        lemmas = None
+        # Cas 1 : CoNLLU imbriqué dans <s>
+        if s.text is not None and "\n" in s.text:
             xml_conllu +=1
-            #logger.info("detected multiline text inside <s>, using contained CONLLU mode, sentence_id=%s,",sent_id)
             raw_text,tokens = concat_forms(s.text)
             raw_text = fix_punctuation_spaces(raw_text)
-        # Cas 2 : La balise <s> ne contient pas de texte direct (ex: texte framenté dans des sous-balises comme <w>)
+            lemmas = get_lemmas(s.text)
+        # Cas 2 : texte fragmenté dans des sous-balises, pas de colonnes CoNLLU -> lemmatisation rapide via simplemma
         elif s.text is None:
             logger.warning("Sentid=%s:<s> text is empty, looking for children texts",sent_id)
-            # Récupération de tout le texte contenu dans les nœuds enfants
             raw_text = "".join(s.itertext())
             logger.warning("using s.itertext() : sentence=%s",raw_text)
-        # Cas 3 : La balise contient du texte simple et direct
+            lemmas = get_lemmas_fast(raw_text)
+        # Cas 3 : texte simple direct, pas de colonnes CoNLLU -> lemmatisation rapide via simplemma
         else:
             raw_text = s.text
             logger.debug("Sentid %s, sent tex: %s",sent_id,raw_text)
             tokens = get_tokens(raw_text)
-        # Enregistrement et nettoyage final pour la phrase actuelle
+            lemmas = get_lemmas_fast(raw_text)
         metadata["sent_id"].append(sent_id)
         raw_text = clean_sentence(raw_text,filepath,sent_id)
         metadata["raw_text"].append(raw_text)
@@ -301,8 +324,8 @@ def parse_sentences_xml_conllu(filepath):
         else:
             logger.warning("token list is None")
             metadata["tokens"].append(None)
+        metadata["lemmas"].append(lemmas)
         sent_list.append(raw_text)
-    # Journalisation récapitulative si du format hybride XML-CoNLLU a été détecté
     if xml_conllu > 0:
         logger.info("Detected and parsed %s XML-CoNLLU sentences,filename=%s",xml_conllu,filepath)
     return sent_list,metadata
@@ -319,7 +342,7 @@ def parse_sentence_trs(file_path=None):
     Valeurs de retour:
         tuple: (sent_list, metadata)
             - sent_list (list): Liste des tours de parole sous forme de texte brut.
-            - metadata (dict): Dictionnaire contenant 'sent_id' (startTime), 'raw_text', et 'tokens'.
+            - metadata (dict): Dictionnaire contenant 'sent_id' (startTime), 'raw_text', 'tokens' et 'lemmas' (toujours None, non applicable pour une transcription orale non annotée).
     """
     logger.info("mode is trs")
     data = None
@@ -336,7 +359,8 @@ def parse_sentence_trs(file_path=None):
     # Initialisation des structures de données
     metadata = {"sent_id": [],
                 "raw_text": [],
-                "tokens":[]}
+                "tokens":[],
+                "lemmas":[]}
     sent_list = []
 
     # Itération sur chaque tour de parole extrait
@@ -353,6 +377,8 @@ def parse_sentence_trs(file_path=None):
         text_raw = clean_sentence(raw_text,file_path,sent_id)
         metadata["raw_text"].append(raw_text)
         metadata["tokens"].append(get_tokens(raw_text))
+        # pas de colonne LEMMA en TRS (transcription orale non annotée morphosyntaxiquement)
+        metadata["lemmas"].append(get_lemmas_fast(raw_text))
         sent_list.append(raw_text)
     return sent_list,metadata
 def parse_sentences(file_path=None,mode=None):
@@ -434,7 +460,11 @@ def calcEmbeddings(collection_file_path=None, output_file_path=None, mode=None,r
         mode (str): Le format du corpus cible (par défaut 'conllu').
         reduce_precision (bool, optional): Si True, sauvegarde les embeddings en float16 pour économiser de l'espace disque.
         overwrite (bool): Si True, force le recalcul même si les fichiers de sortie existent déjà.
-        token_mode (bool): Si True, utilise l'encodage par token et ajoute le suffixe '_token' au fichier de sortie.
+        token_mode (bool): Si True, utilise l'encodage par token. Les embeddings de tokens
+            individuels sont regroupés par lemme puis moyennés (voir build_lemma_embeddings) :
+            le fichier '_token.npy' final contient une matrice uniforme (n_lemmes_uniques,
+            hidden_dim), une ligne par lemme unique du fichier, et non les embeddings bruts
+            par mot/par phrase.
         no_daemon (bool): Si True, exécute le modèle localement au lieu du processus démon.
         use_ollama (bool): Si True, délègue l'encodage à une API Ollama externe.
         ollama_host (str): L'adresse du serveur Ollama.
@@ -442,46 +472,96 @@ def calcEmbeddings(collection_file_path=None, output_file_path=None, mode=None,r
 
     Valeurs de retour:
         tuple: (embeddings, metadata)
-            - embeddings (numpy.ndarray): Matrice des vecteurs générés ou chargés.
-            - metadata (dict): Dictionnaire contenant les métadonnées (ID, texte, tokens).
+            - embeddings (numpy.ndarray): Matrice des vecteurs générés ou chargés. En mode
+              token, il s'agit de la matrice moyennée par lemme (n_lemmes_uniques, hidden_dim).
+            - metadata (dict): Dictionnaire contenant les métadonnées (ID, texte, tokens, lemmes).
     """
     token_suffix=""
-    # Gestion du suffixe pour différencier les fichiers d'embeddings par token
     if token_mode and "_token" not in output_file_path :
         token_suffix = "_token"
+    # chemin réel du fichier d'embeddings (avec '_token' en mode token) et de l'index de lemmes
+    effective_output_path = output_file_path.replace(".npy", token_suffix+".npy")
+    lemma_index_file = effective_output_path.replace(".npy", "_lemma_index.json")
 
     base, ext = os.path.splitext(collection_file_path)
-    # Vérification de l'existence du fichier embeddings cible : si on ne force pas l'écrasement et que les fichiers existent, on charge depuis le disque
-    if (not overwrite) and  (os.path.exists(output_file_path)) and os.path.exists(base+".json"):
-        logger.warning("embedding file and metadata file already exist, loading from %s and %s",output_file_path,base+token_suffix+".json")
-        embeddings = load_embeddings(base+".npy")
+    cache_ok = os.path.exists(effective_output_path) and os.path.exists(base+".json")
+    if token_mode:
+        # en mode token, la matrice .npy est inutilisable sans son index de lemmes
+        cache_ok = cache_ok and os.path.exists(lemma_index_file)
+    if (not overwrite) and cache_ok:
+        logger.warning("embedding file and metadata file already exist, loading from %s and %s",effective_output_path,base+".json")
+        embeddings = load_embeddings(effective_output_path)
         metadata= load_metadata(base+".json")
         return embeddings,metadata
-    # 1. Étape de parsing : extraction des données du fichier source
     logger.info("parsing sentences, file=%s mode=%s",collection_file_path,mode)
     sentence_list,metadata = parse_sentences(collection_file_path,mode=mode)
-    # 2. Étape d'encodage : transformation des textes en vecteurs
     logger.info("Encoding sentences with model")
 
-    t0 = time.perf_counter() # chronomètre pour mesurer le temps d'excécution
+    t0 = time.perf_counter()
     if token_mode:
         logger.info("using token level embedding mode")
-        embeddings = encode(sentence_list, chunk_size=64,token_mode=True,no_daemon=no_daemon,use_ollama=use_ollama,ollama_host=ollama_host,ollama_model=ollama_model)
-        output_file_path = output_file_path.replace(".npy",token_suffix+".npy")
+        token_input_list = [
+            " ".join(t.replace(" ", "_") for t in tok_list) if tok_list else ""
+            for tok_list in metadata["tokens"]
+        ]
+        embeddings = encode(
+            token_input_list,
+            chunk_size=CHUNK_SIZE,
+            token_mode=True,
+            no_daemon=no_daemon,
+            use_ollama=use_ollama,
+            ollama_host=ollama_host,
+            ollama_model=ollama_model
+        )
+
+        lemma_list, lemma_embeddings = build_lemma_embeddings(
+            embeddings, metadata["lemmas"]
+        )
+        embeddings = lemma_embeddings
+
+        if reduce_precision:
+            embeddings = embeddings.astype(np.float16)
+
+        np.save(effective_output_path, embeddings)
+
+        lemma_index_path = effective_output_path.replace(".npy", "_lemma_index.json")
+        with open(lemma_index_path, "w", encoding="utf-8") as f:
+            json.dump(lemma_list, f, ensure_ascii=False)
+        logger.info("lemma index saved to %s", lemma_index_path)
     else:
         logger.info("using sentence level embedding mode")
-        embeddings = encode(sentence_list, chunk_size=64,no_daemon=no_daemon,use_ollama=use_ollama,ollama_host=ollama_host,ollama_model=ollama_model)
+        embeddings = encode(
+            sentence_list,
+            chunk_size=CHUNK_SIZE,
+            no_daemon=no_daemon,
+            use_ollama=use_ollama,
+            ollama_host=ollama_host,
+            ollama_model=ollama_model
+        )
+        if reduce_precision:
+            np.save(effective_output_path, embeddings.astype(np.float16))
+        else:
+            np.save(effective_output_path, embeddings)
     t1 = time.perf_counter()
     procession_time = t1-t0
     logger.info("Embeddings created in %s seconds",np.round(procession_time,2))
-    # 3. Étape de sauvegarde
-    # Gestion du nom du fichier: le 'replace' nettoie préventivement le nom de fichier au cas où le suffixe s'accumulerait
     logger.info("saving embeddings to %s", output_file_path.replace("_token_token","_token"))
-    # Option d'optimisation du stockage (réduit deux fois la talile du fichier embeddings .npy avec un coût sur la précision de l'information)
-    if reduce_precision:
-        np.save(output_file_path,embeddings.astype(np.float16))
+    if token_mode:
+        # embeddings est désormais une matrice uniforme (n_lemmes_uniques, hidden_dim)
+        # -> sauvegarde directe, plus besoin de tableau 'object'/allow_pickle
+        if reduce_precision:
+            embeddings = embeddings.astype(np.float16)
+        np.save(output_file_path, embeddings)
+        # Sauvegarde de la liste ordonnée des lemmes (index ligne -> lemme)
+        lemma_index_path = output_file_path.replace(".npy", "_lemma_index.json")
+        with open(lemma_index_path, "w", encoding="utf-8") as f:
+            json.dump(lemma_list, f, ensure_ascii=False)
+        logger.info("lemma index saved to %s", lemma_index_path)
     else:
-        np.save(output_file_path,embeddings)
+        if reduce_precision:
+            np.save(output_file_path,embeddings.astype(np.float16))
+        else:
+            np.save(output_file_path,embeddings)
     logger.info("saved successfully")
 
     return embeddings,metadata
@@ -501,7 +581,39 @@ def save_metadata(metadata,output_file=None,token_mode=False):
     with open(output_file,"w",encoding="utf-8") as f:
         # Sérialisation et écriture du dictionnaire Python en format JSON
         json.dump(metadata,f)
+def build_lemma_embeddings(embeddings, lemmas_per_sentence):
+    """
+    Regroupe les embeddings de tokens par lemme à l'échelle d'un seul fichier de corpus,
+    puis moyenne les vecteurs de chaque groupe (np.mean) pour produire un seul embedding
+    par lemme unique.
 
+    Args:
+        embeddings (list): une entrée par phrase, chacune un tableau numpy
+            (n_tokens_phrase, hidden_dim), tel que retourné par l'encodage en mode token.
+        lemmas_per_sentence (list): metadata["lemmas"], une entrée par phrase, liste de
+            lemmes alignée token-à-token avec embeddings (même longueur par phrase).
+
+    Valeur de retour:
+        tuple: (lemma_list, lemma_embeddings)
+            - lemma_list (list): lemmes uniques triés (l'index dans cette liste = ligne dans lemma_embeddings)
+            - lemma_embeddings (numpy.ndarray): matrice (n_lemmes_uniques, hidden_dim)
+    """
+    groups = {}
+    for sent_embs, sent_lemmas in zip(embeddings, lemmas_per_sentence):
+        if sent_embs is None or sent_lemmas is None:
+            continue
+        if len(sent_embs) != len(sent_lemmas):
+            logger.warning("mismatch: %s embeddings vs %s lemmas, skipping sentence",
+                            len(sent_embs), len(sent_lemmas))
+            continue
+        for vec, lemma in zip(sent_embs, sent_lemmas):
+            if lemma is None or lemma == "_":
+                continue
+            groups.setdefault(lemma, []).append(vec)
+
+    lemma_list = sorted(groups.keys())
+    lemma_embeddings = np.stack([np.mean(groups[l], axis=0) for l in lemma_list]).astype(np.float32)
+    return lemma_list, lemma_embeddings
 def encode_folder(input_folder=None,overwrite=False,token_mode=False,no_daemon=False,use_ollama=False,ollama_host='localhost:11434',ollama_model=None):
     """
     Parcourt un répertoire ou un wildcard (ex. *Camus*) pour traiter en lot des fichiers de corpus,
@@ -542,14 +654,13 @@ def encode_folder(input_folder=None,overwrite=False,token_mode=False,no_daemon=F
         logger.info("%s",f)
     # Boucle de traitement principale pour chaque fichier détecté
     for f,ext in zip(file_list,found_extentions):
-        logger.info("Encoding file %s/%s filename=%s",cnt,len_f,f)
-        # Appel de la fonction principale d'extraction et d'encodage
-        # Le f.replace(ext, 'npy') remplace l'extension d'origine (ex: 'xml') par 'npy'
-        # pour le fichier de sortie, mais présuppose que le nom de l'extension ne figure pas ailleurs dans le chemin.
-        embeddings,metadata = calcEmbeddings(f,f.replace(ext,'npy'),ext,overwrite=overwrite,token_mode=token_mode,no_daemon=no_daemon,use_ollama=use_ollama,ollama_host=ollama_host,ollama_model=ollama_model)
-        # Sauvegarde synchronisée des métadonnées associées en format JSON
-        save_metadata(metadata,f.replace(ext,"json"),token_mode=token_mode)
-        cnt +=1
+            logger.info("Encoding file %s/%s filename=%s",cnt,len_f,f)
+            # splitext ne touche que l'extension finale (f.replace(ext,...) remplaçait toutes les occurrences dans le chemin)
+            base = os.path.splitext(f)[0]
+            embeddings,metadata = calcEmbeddings(f,base+".npy",ext,overwrite=overwrite,token_mode=token_mode,no_daemon=no_daemon,use_ollama=use_ollama,ollama_host=ollama_host,ollama_model=ollama_model)
+            # Sauvegarde synchronisée des métadonnées associées en format JSON
+            save_metadata(metadata,base+".json",token_mode=token_mode)
+            cnt +=1
 
 # fonction main pour tester le script
 if __name__ == "__main__":

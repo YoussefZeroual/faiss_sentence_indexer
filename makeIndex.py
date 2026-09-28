@@ -132,15 +132,17 @@ def makeIndex(embeddings=None,embedding_file_path=None,metric_type=None,index_ty
         logger.warning("Index Type unrecognized or empty: %s",index_type)
         raise ValueError(f"Index type unkown or empty: {index_type}")
     # Adaptation du nom de fichier de sortie selon le mode d'encodage (phrase ou token)
-    if token_mode:
-        output_file_path = output_file_path.replace(".faiss","_token.faiss")
+    token_suffix = ""
+    if token_mode and "_token" not in output_file_path:
+        token_suffix = "_token"
+    effective_output_path = output_file_path.replace(".faiss", token_suffix + ".faiss")
 
     # Sauvegarde physique de l'index sur le disque
-    faiss.write_index(index,output_file_path)
+    faiss.write_index(index, effective_output_path)
     t1 = time.perf_counter()  #fin du chronomètre pour calculer le temps d'exécution
     exec_time = t1-t0
     logger.info("Index created successfully in %s seconds",np.round(exec_time,3))
-    logger.info("index written successfully to %s",output_file_path)
+    logger.info("index written successfully to %s",effective_output_path)
 
 
     return index
@@ -166,9 +168,19 @@ def makeIndex_folder(input_folder=None,metric_type=None,index_type=None,m=512,ov
         emb_ext = ".npy"
     # Récupération des chemins de fichiers
     # Si input_folder contient un wildcard ('*'), on utilise glob pour trouver les correspondances
+    def _corpus_base(path):
+        # retire l'extension, puis les suffixes '_lemma_index' et '_token' (uniquement en fin de nom)
+        base = os.path.splitext(path)[0]
+        for suffix in ("_lemma_index", "_token"):
+            if base.endswith(suffix):
+                base = base[:-len(suffix)]
+        return base
+
     if '*' in input_folder:
         file_list = glob.glob(input_folder)
-        file_list = [os.path.splitext(f)[0].replace("_token","")+emb_ext  for f in file_list]
+        file_list = [_corpus_base(f)+emb_ext for f in file_list]
+        # ignore les chemins déduits qui ne correspondent à aucun fichier réel
+        file_list = [f for f in file_list if os.path.exists(f)]
     else:
         # Sinon, on recherche tous les fichiers avec l'extension appropriée dans le répertoire fourni
         file_list = glob.glob(input_folder+"/*"+emb_ext)
@@ -186,7 +198,7 @@ def makeIndex_folder(input_folder=None,metric_type=None,index_type=None,m=512,ov
         # Définition du chemin de sortie pour le fichier d'index
         output_file_path = base+".faiss"
         # Appel de la fonction makeIndex pour traiter ce fichier spécifique
-        index = makeIndex(embedding_file_path=f,metric_type=metric_type,index_type=index_type,m=m,output_file_path=output_file_path,overwrite=overwrite)
+        index = makeIndex(embedding_file_path=f,metric_type=metric_type,index_type=index_type,m=m,output_file_path=output_file_path,overwrite=overwrite,token_mode=token_mode)
 
 
 if __name__ == "__main__":

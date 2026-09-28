@@ -30,7 +30,7 @@ TOKEN_MODEL_NAME = 'intfloat/multilingual-e5-base'
 
 HOST, PORT = "localhost", 6000
 BACKLOG = 256
-MAX_BATCH_SIZE = 256
+MAX_BATCH_SIZE = 64
 BATCH_WINDOW_S = 0.015
 KEEP_MODEL_LOADED_TIMEOUT = 10 #seconds
 device = 'None'
@@ -146,6 +146,43 @@ def average_pool_last_n_layers(hidden_states: tuple[Tensor, ...],
     stacked = torch.stack(hidden_states[-num_layers:])   # (n, batch, seq, hidden)
     layer_avg = stacked.mean(dim=0)                       # (batch, seq, hidden)
     return average_pool(layer_avg, attention_mask)
+def merge_subwords_to_words(hidden_states, encoded_batch):
+    """
+    Regroupe les vecteurs de sous-mots (subwords) en un vecteur par mot, en moyennant
+    les sous-tokens appartenant au même mot selon la segmentation du tokenizer.
+    Les tokens spéciaux (CLS, SEP, PAD) n'appartiennent à aucun mot et sont ignorés.
+
+    Args:
+        hidden_states (Tensor): (batch, seq_len, hidden_dim), sortie du modèle
+            (dernière couche seule, ou moyenne des dernières couches selon use_last_n_layers).
+        encoded_batch (BatchEncoding): sortie brute du tokenizer (rapide/fast requis
+            pour disposer de la méthode word_ids()), AVANT conversion en dict de tenseurs device.
+
+    Valeur de retour:
+        list: une entrée par phrase du batch, chacune un numpy.ndarray (n_mots_phrase, hidden_dim).
+    """
+    batch_size = hidden_states.shape[0]
+    hidden_dim = hidden_states.shape[-1]
+    result = []
+    for i in range(batch_size):
+        word_ids = encoded_batch.word_ids(batch_index=i)
+        # regroupe les positions de sous-tokens par identifiant de mot
+        word_to_positions = {}
+        for pos, wid in enumerate(word_ids):
+            if wid is None:
+                continue  # token spécial (CLS/SEP/PAD), ignoré
+            word_to_positions.setdefault(wid, []).append(pos)
+        # moyenne des sous-tokens pour chaque mot, dans l'ordre naturel des mots
+        word_vecs = []
+        for wid in sorted(word_to_positions.keys()):
+            positions = word_to_positions[wid]
+            word_vecs.append(hidden_states[i, positions, :].mean(dim=0))
+        if word_vecs:
+            sent_arr = torch.stack(word_vecs).cpu().detach().numpy().astype(np.float32)
+        else:
+            sent_arr = np.zeros((0, hidden_dim), dtype=np.float32)
+        result.append(sent_arr)
+    return result
 
 def batching_worker():
     """
@@ -175,21 +212,23 @@ def batching_worker():
             batch_sentences.extend(s)
 
         try:
-            # Branche 1 : Encodage orienté tokens (multilingual-e5-base)
             if token_mode:
-                # Tokenisation avec troncature et padding dynamique (max 512 tokens)
-                batch_dict = tokenizer(batch_sentences, max_length=512, padding=True, truncation=True, return_tensors='pt')
-                # Transfert des tenseurs sur le périphérique matériel (GPU ou CPU)
-                batch_dict = {k: v.to(device) for k, v in batch_dict.items()}
-                # Pooling : combinaison des plongements des sous-mots: cette partie sera revue dans la version à venir étant donné que le mode token sera destiné à un encodage effectif des mots individuels sans pooling.
-                if use_last_n_layers:
-                    outputs = token_model(**batch_dict, output_hidden_states=True)
-                    vecs = average_pool_last_n_layers(outputs.hidden_states, batch_dict["attention_mask"], num_layers=4)
-                else:
-                    outputs = token_model(**batch_dict, output_hidden_states=False)
-                    vecs = average_pool(outputs.last_hidden_state, batch_dict['attention_mask'])
-                # Détachement de l'objet PyTorch et conversion en NumPy (CPU)
-                vecs = vecs.cpu().detach().numpy().astype(np.float32)
+                # 'encoded' garde la méthode word_ids() (nécessaire pour regrouper les subwords par mot)
+                # 'model_inputs' est la version convertie sur le device, utilisée pour l'appel au modèle
+                encoded = tokenizer(batch_sentences, max_length=512, padding=True, truncation=True, return_tensors='pt')
+                model_inputs = {k: v.to(device) for k, v in encoded.items()}
+                # torch.no_grad() : désactive le suivi du graphe d'autograd, indispensable en inference pure
+                # pour éviter que les activations intermédiaires ne s'accumulent en mémoire GPU à chaque batch
+                with torch.no_grad():
+                    if use_last_n_layers:
+                        outputs = token_model(**model_inputs, output_hidden_states=True)
+                        stacked = torch.stack(outputs.hidden_states[-4:])
+                        hidden = stacked.mean(dim=0)
+                    else:
+                        outputs = token_model(**model_inputs, output_hidden_states=False)
+                        hidden = outputs.last_hidden_state
+                # vecs est une liste de tableaux (n_mots_phrase, hidden_dim), un par phrase du lot
+                vecs = merge_subwords_to_words(hidden, encoded)
             # Branche 2 : Encodage en mode phrases (SentenceTransformer)
             else:
                 vecs = model.encode(batch_sentences,batch_size=256).astype(np.float32)
@@ -256,7 +295,13 @@ def handle_client(conn):
             conn.send(("progress", done, total))
         # 3. Assemblage final
         # Concaténation de tous les sous-lots de vecteurs en une seule grande matrice NumPy
-        result = np.concatenate(all_vecs, axis=0)
+        # (mode phrase), ou en une seule liste plate de tableaux par phrase (mode token,
+        # car les tableaux sont de tailles différentes et ne peuvent pas former une matrice uniforme)
+        if token_mode:
+            # chaque payload est une liste de tableaux (un par phrase du chunk) -> concaténation de listes
+            result = [vec for chunk_vecs in all_vecs for vec in chunk_vecs]
+        else:
+            result = np.concatenate(all_vecs, axis=0)
         # Envoi du résultat final au client
         conn.send(("done", result))
         logger.info("Job %s: completed, sent %d embeddings", job_id, len(result))
@@ -274,8 +319,6 @@ def handle_client(conn):
     finally:
         # 5. Nettoyage : fermeture systématique de la connexion (évite les connexions fantômes)
         conn.close()
-
-
 def accept_loop(listener):
     while True:
         try:

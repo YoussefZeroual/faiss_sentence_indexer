@@ -124,8 +124,8 @@ def encode_no_daemon(sentences=None,token_mode=False):
         from torch import Tensor
         from transformers import AutoTokenizer, AutoModel
         import torch
-
         from sentence_transformers import SentenceTransformer
+        from utils.embed_daemon import average_pool,average_pool_last_n_layers,merge_subwords_to_words
         logger.info("Loading models...")
         # Initialisation du modèle pour le mode 'phrases' (biliothèque SentenceTransformer)
         model = SentenceTransformer(MODEL_NAME)
@@ -145,19 +145,20 @@ def encode_no_daemon(sentences=None,token_mode=False):
         # Traitement par lots manuel avec affichage d'une barre de progression
         for i in tqdm(range(0, len(sentences), batch_size)):
             batch = sentences[i:i+batch_size]
-            # Préparation des tenseurs pour le modèle
-            batch_dict = token_tokenizer(batch, max_length=512, padding=True, truncation=True, return_tensors='pt')
-            batch_dict = {k: v.to(device) for k, v in batch_dict.items()}
+            # 'encoded' garde la méthode word_ids() (nécessaire pour regrouper les subwords par mot)
+            # 'model_inputs' est la version convertie sur le device, utilisée pour l'appel au modèle
+            encoded = token_tokenizer(batch, max_length=512, padding=True, truncation=True, return_tensors='pt')
+            model_inputs = {k: v.to(device) for k, v in encoded.items()}
             # Traitement des tenseurs par le modèle avec récupération des états cachés
-            outputs = token_model(**batch_dict, output_hidden_states=True)
-            # Pooling mathématique spécifique (moyenne des 4 dernières couches)
-            # N.B: le pooling sera probablement enlevé de la version à venir étant donné que le mode token concerne effectivement la création de vecteurs pour les tokens individuels et non un pooling de ces tokens
-            vec = average_pool_last_n_layers(outputs.hidden_states, batch_dict["attention_mask"], num_layers=4)
-
-            # Copie des données sur le CPU et conversion en NumPy
-            vecs.append(vec.cpu().detach().numpy().astype(np.float32))
-        # Concaténation de tous les lots en une seule matrice
-        vecs = np.vstack(vecs)
+            outputs = token_model(**model_inputs, output_hidden_states=True)
+            # Moyenne des 4 dernières couches, puis regroupement des sous-mots (subwords) par mot
+            # (remplace l'ancien pooling par phrase: on veut un vecteur par mot, pas par phrase)
+            stacked = torch.stack(outputs.hidden_states[-4:])
+            hidden = stacked.mean(dim=0)
+            batch_vecs = merge_subwords_to_words(hidden, encoded)
+            # batch_vecs est une liste de tableaux (n_mots_phrase, hidden_dim), un par phrase du batch
+            vecs.extend(batch_vecs)
+        # vecs reste une liste plate de tableaux par phrase (tailles différentes, pas de matrice uniforme possible)
     else:
         # branche 2: mode phrase
         # COntrairement au modèle de traitement token, le modèle SentenceTransformer gère lui-même son propre batching et sa barre de progression
@@ -182,7 +183,10 @@ def encode(sentences, chunk_size=512, show_progress=True,token_mode=False,no_dae
         ollama_model (str): Modèle Ollama cible.
 
     Valeur retournée:
-        numpy.ndarray: La matrice finale des embeddings générés.
+        numpy.ndarray ou list: En mode phrase (token_mode=False), une matrice numpy.ndarray
+            (n_phrases, hidden_dim). En mode token (token_mode=True), une liste plate de
+            tableaux numpy, un par phrase, chacun de forme (n_mots_phrase, hidden_dim) —
+            tailles différentes selon la longueur de chaque phrase, donc pas de matrice uniforme.
 
     Raises:
         RuntimeError: Si le processus d'encodage (démon ou réseau) échoue.

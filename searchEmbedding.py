@@ -191,7 +191,7 @@ def search(query_vector=None, query_str=None, index=None, index_file=None, abtt_
                 raise FileNotFoundError(f"{abtt_path} not found, re-run calcEmbeddings")
             abtt_path = None
 
-        if abtt_path is not None:
+        if abtt_path is not None and (not allow_no_abtt):
             query_vector = apply_abtt(query_vector, abtt_path)
         else:
             logger.warning("Searching in token mode WITHOUT ABTT (allow_no_abtt=True): "

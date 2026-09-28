@@ -144,9 +144,23 @@ def resolve_abtt_path(abtt_file=None, index_file=None):
         return abtt_path_from_index(index_file)
     raise ValueError("Token mode requires abtt_file or index_file to locate the ABTT parameters")
 
+def get_lemma_occurrences(lemmas, metadata):
+    """
+    Pour une liste de lemmes, renvoie {lemme: [(token, sent_id), ...]} en un seul
+    passage sur les métadonnées.
+    """
+    if metadata is None:
+        return {}
+    wanted = {l: [] for l in lemmas}
+    for token_list, lemma_list, sent_id in zip(metadata["tokens"], metadata["lemmas"], metadata["sent_id"]):
+        for token, lemma in zip(token_list, lemma_list):
+            if lemma in wanted:
+                wanted[lemma].append((token, sent_id))
+    return wanted
+
 def search(query_vector=None, query_str=None, index=None, index_file=None, abtt_file=None,
            metric_type=None, top_k=10, metadata=None, token_mode=False,
-           no_daemon=False, lemma_list=None, allow_no_abtt=False):
+           no_daemon=False, lemma_list=None, allow_no_abtt=False,metadata_file=None):
     """
     Exécute une recherche de similarité dans un index FAISS et renvoie les meilleures
     correspondances avec leurs métadonnées.
@@ -192,6 +206,7 @@ def search(query_vector=None, query_str=None, index=None, index_file=None, abtt_
             abtt_path = None
 
         if abtt_path is not None and (not allow_no_abtt):
+            logger.info("Applying ABTT to query")
             query_vector = apply_abtt(query_vector, abtt_path)
         else:
             logger.warning("Searching in token mode WITHOUT ABTT (allow_no_abtt=True): "
@@ -210,6 +225,19 @@ def search(query_vector=None, query_str=None, index=None, index_file=None, abtt_
             matches = [(lemma_list[idx], np.round(float(distance), 3))
                        for idx, distance in zip(indices[0], distances[0])
                        if 0 <= idx < len_lemmas]
+
+            occurrences = {}
+            if metadata is None and metadata_file is not None:
+                try:
+                    metadata = load_metadata(metadata_file)
+                except FileNotFoundError:
+                    logger.warning("%s not found, cannot display tokens and sent_ids", metadata_file)
+            if metadata is not None:
+                occurrences = get_lemma_occurrences([m[0] for m in matches], metadata)
+            else:
+                logger.warning("No metadata available, cannot display lemma tokens and sent_ids")
+            # (lemme, score, [(token, sent_id), ...])
+            matches = [(lemma, score, occurrences.get(lemma, [])) for lemma, score in matches]
         else:
             len_metadata = len(metadata["raw_text"])
             matches = [(metadata["sent_id"][idx], metadata["raw_text"][idx], np.round(float(distance), 3))
@@ -228,9 +256,12 @@ def load_lemma_index(lemma_index_path=None):
     logger.info("loading lemma index from:%s",lemma_index_path)
     with open(lemma_index_path,"r",encoding="utf-8") as f:
         return json.load(f)
+
+
+
 def search_folder(input_folder=None, query_str=None, query_vector=None,
                   metric_type=faiss.METRIC_INNER_PRODUCT, top_k=10, verbose=True,
-                  token_mode=False, no_daemon=False, allow_no_abtt=False):
+                  token_mode=False, no_daemon=False, allow_no_abtt=False,max_token_ids_occ=8):
     """
     Exécute une recherche de similarité sur un ensemble d'index FAISS contenus dans un dossier.
 
@@ -246,6 +277,7 @@ def search_folder(input_folder=None, query_str=None, query_vector=None,
         no_daemon (bool): Si True, encodage local sans démon.
         allow_no_abtt (bool): Si True, les corpus sans fichier '_abtt.json' ne sont plus
             ignorés : la recherche se fait sans ABTT (tests uniquement).
+        max_token_ids_occ: nombre max de tokens et sent_ids à afficher par lemme (mode token)
     Valeurs retournées:
         None: agrège et affiche les résultats.
     """
@@ -307,8 +339,8 @@ def search_folder(input_folder=None, query_str=None, query_vector=None,
             result = search(query_str=query_str, query_vector=query_vector, index=index,
                             index_file=f, abtt_file=abtt_path, metric_type=metric_type,
                             top_k=top_k, token_mode=token_mode, no_daemon=no_daemon,
-                            lemma_list=lemma_list, allow_no_abtt=allow_no_abtt)
-            result = [(f, r[0], float(r[1])) for r in result]
+                            lemma_list=lemma_list, allow_no_abtt=allow_no_abtt,metadata_file=base.replace("_token","")+".json")
+            result = [(f, r[0], float(r[1]), r[2]) for r in result]
         else:
             try:
                 metadata = load_metadata(base + ".json")
@@ -332,12 +364,16 @@ def search_folder(input_folder=None, query_str=None, query_vector=None,
         logger.warning("Some index files were skipped because file or corresponding metadata files were not found")
     if results == []:
         logger.warning("Search query didn't return any results, input file list probaby empty")
-
     if verbose:
         if token_mode:
-            print("index file                | lemma       | similarity score")
+            max_occ = max_token_ids_occ  # nombre max d'occurrences affichées par lemme
+            print("index file                | lemma       | similarity score | tokens (sent_id)")
             for r in results:
-                print(f"{r[0]} | {r[1]} | {r[2]}")
+                occ = r[3]
+                shown = ", ".join(f"{tok} ({sid})" for tok, sid in occ[:max_occ])
+                if len(occ) > max_occ:
+                    shown += f", ... (+{len(occ) - max_occ})"
+                print(f"{r[0]} | {r[1]} | {r[2]} | {shown}")
         else:
             print("index file                | Sent id               | Sentence    | similarity score")
             for r in results:
